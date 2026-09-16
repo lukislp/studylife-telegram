@@ -1,0 +1,20 @@
+name: Dependabot lock files
+
+# Thin caller of the shared implementation in lukislp/ci-workflows: regenerates the lock files
+# on Dependabot's own PRs with the CI tool versions and pushes them back onto the PR branch.
+# Plain pull_request on purpose (never pull_request_target); AUTOMERGE_TOKEN is stored as a
+# Dependabot secret, which only Dependabot-triggered runs can read.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  lockfiles:
+    uses: lukislp/ci-workflows/.github/workflows/dependabot-lockfiles.yml@7e63fcaccd6d5c152e694dea32184a2ce0823cd7 # v1.0.1
+    with:
+      uv-version: "0.5.8"
+    secrets:
+      AUTOMERGE_TOKEN: ${{ secrets.AUTOMERGE_TOKEN }}

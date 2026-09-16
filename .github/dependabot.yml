@@ -1,0 +1,26 @@
+# Weekly Dependabot updates: GitHub Actions, uv (pyproject + uv.lock) and the Dockerfile.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "fix(ci)"
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "fix(deps)"
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "fix(docker)"
+    # The Python base image tracks the version the add-on is tested on; minor and major
+    # bumps (3.12 -> 3.14) are a deliberate change, patch tags still come through.
+    ignore:
+      - dependency-name: python
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]

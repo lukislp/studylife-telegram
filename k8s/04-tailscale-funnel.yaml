@@ -1,0 +1,46 @@
+# Public exposure via Tailscale Funnel - same mechanism as studylife-alexa's own
+# k8s/05-tailscale-funnel.yaml, with its own dedicated tag so each publicly-reachable
+# service stays independently scoped at the tailnet ACL level (login.tailscale.com/admin/
+# acls/file): tailscale.com/tags below overrides this Ingress's proxy away from the
+# (funnel-incapable) default tag to tag:studylife-telegram-funnel - the only proxy in the
+# cluster tagged that way (must be added to tagOwners/nodeAttrs in the tailnet policy
+# before this Ingress can actually serve traffic).
+#
+# The operator's proxy StatefulSet for this Ingress runs in the "tailscale" namespace (not
+# this one) - k8s/03-network-policies.yaml's allow-tailscale-to-studylife-telegram rule is
+# what actually lets its traffic reach the pod.
+#
+# Explicit path allowlist, NOT a defaultBackend: /telegram (Telegram's servers deliver every
+# update here) and /webhooks/studylife (StudyLife's servers call this for session and goal
+# events). /healthz is deliberately absent - operator-only, no
+# reason to be internet-facing.
+#
+# Bootstrap-only, NOT Flux-managed - same RBAC reasoning as k8s/00-namespace.yaml/
+# k8s/01-secret.yaml/k8s/03-network-policies.yaml (kustomize-controller's ClusterRole has no
+# permission on the networking.k8s.io Ingress resource at all).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: studylife-telegram-funnel
+  namespace: studylife-telegram
+  annotations:
+    tailscale.com/funnel: "true"
+    tailscale.com/tags: "tag:studylife-telegram-funnel"
+spec:
+  ingressClassName: tailscale
+  rules:
+    - http:
+        paths:
+          # Prefix, not Exact, on every path below - the Tailscale operator's own path
+          # matching is prefix-only regardless of pathType (docs.tailscale.com/
+          # kubernetes-operator/reference/limitations), same finding studylife-alexa's own
+          # Ingress documents. Harmless here since these two paths don't prefix-collide.
+          - path: /telegram
+            pathType: Prefix
+            backend: {service: {name: studylife-telegram, port: {number: 8000}}}
+          - path: /webhooks/studylife
+            pathType: Prefix
+            backend: {service: {name: studylife-telegram, port: {number: 8000}}}
+  tls:
+    - hosts:
+        - studylife-telegram

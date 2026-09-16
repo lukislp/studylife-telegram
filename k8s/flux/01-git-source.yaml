@@ -1,0 +1,18 @@
+# Points Flux at this repo. Needs write access (not just read), since
+# image-automation-controller pushes commits for new image tags directly to main (see
+# 04-image-update-automation.yaml). Reuses the cluster-wide "studylife-git-auth" secret
+# (flux-system namespace, managed in the homelab-infra repo) - same as every other StudyLife
+# add-on repo. Works against a private repo too, since that secret already carries a PAT/
+# deploy key with read access, not just relying on the repo being public.
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: studylife-telegram
+  namespace: flux-system
+spec:
+  interval: 5m
+  url: https://github.com/lukislp/studylife-telegram.git
+  ref:
+    branch: main
+  secretRef:
+    name: studylife-git-auth

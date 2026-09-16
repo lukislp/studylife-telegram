@@ -1,0 +1,46 @@
+# Default-deny ingress baseline; egress stays open (outgoing calls to Telegram's Bot API and
+# StudyLife's own API, same open-egress strategy as every other StudyLife add-on's own
+# network-policies file). Bootstrap-only, NOT Flux-managed - kustomize-controller's ClusterRole
+# (studylife repo's k8s/flux/06-reconciler-rbac.yaml) has no "networkpolicies" permission.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: studylife-telegram
+spec:
+  podSelector: {}
+  policyTypes: ["Ingress"]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns
+  namespace: studylife-telegram
+spec:
+  podSelector: {}
+  policyTypes: ["Egress"]
+  egress:
+    - to:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: kube-system } }
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+    - {} # egress otherwise unrestricted - this policy only adds an explicit DNS allowance
+---
+# Lets the Tailscale operator's ingress proxy (k8s/04-tailscale-funnel.yaml, a single-replica
+# StatefulSet the operator creates in its own "tailscale" namespace, not this one) reach the
+# pod - the ONLY path that can make this service reachable from outside the tailnet. Mirrors
+# studylife-alexa's own allow-tailscale-to-studylife-alexa rule exactly.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-tailscale-to-studylife-telegram
+  namespace: studylife-telegram
+spec:
+  podSelector: { matchLabels: { app: studylife-telegram } }
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: tailscale } }
+      ports:
+        - { protocol: TCP, port: 8000 }

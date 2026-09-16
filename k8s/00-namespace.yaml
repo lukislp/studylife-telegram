@@ -1,0 +1,23 @@
+# Dedicated namespace - same convention as every other StudyLife add-on's own
+# k8s/00-namespace.yaml. Pod Security Standards: "baseline" hard-enforced (no hostPath/
+# hostNetwork/privileged needed - Secret only, no PVC), "restricted" as warn/audit only.
+#
+# NOT applied via Flux: kustomize-controller's least-privilege ClusterRole (studylife repo's
+# k8s/flux/06-reconciler-rbac.yaml) grants no permission on the "namespaces" resource at all -
+# only Deployments/ConfigMaps/Services. This file is bootstrap-only, applied once by hand
+# (kubectl apply -f k8s/00-namespace.yaml).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: studylife-telegram
+  labels:
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: default
+  namespace: studylife-telegram
+automountServiceAccountToken: false
