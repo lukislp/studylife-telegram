@@ -1,3 +1,10 @@
+## [1.0.1](https://github.com/lukislp/studylife-telegram/compare/v1.0.0...v1.0.1) (2026-09-16)
+
+
+### Bug Fixes
+
+* **ci:** bump astral-sh/setup-uv from 10.0.1 to 10.1.0 ([d1d87e0](https://github.com/lukislp/studylife-telegram/commit/d1d87e080f3264a7bf45cc2eff103895ee4c90ce))
+
 # 1.0.0 (2026-09-16)
 
 
