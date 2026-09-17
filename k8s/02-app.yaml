@@ -1,14 +1,20 @@
-# The service itself. Image tag is a placeholder overwritten by Flux's
-# ImageUpdateAutomation (k8s/flux/04-image-update-automation.yaml) the moment it first
-# reconciles against a real published tag - mirrors every other StudyLife add-on's own
-# k8s/*-app.yaml. This repo's Dockerfile creates "appuser" with an explicit numeric
-# --uid 1000, so runAsNonRoot/runAsUser is safe here without live inspection.
-#
-# No PersistentVolumeClaim, unlike studylife-alexa/studylife-mcp/studylife-webhooks - this
-# bot holds no SQLite store at all (see Dockerfile's own comment); the single StudyLife API
-# key and both Telegram credentials live purely in the Secret above. Fully stateless, so
-# RollingUpdate (the default strategy) is fine, and multiple replicas would be too if ever
-# needed - not done here since a personal-use bot never needs more than one.
+# The service itself. The image tag is written by the deploy-bump job in CI on every release.
+# This repo's Dockerfile creates "appuser" with an explicit numeric --uid 1000, so
+# runAsNonRoot/runAsUser is safe here without live inspection.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: studylife-telegram-data
+  namespace: studylife-telegram
+spec:
+  accessModes: ["ReadWriteOnce"]
+  # Longhorn (cross-node-replicated, homelab-infra/cluster/11-longhorn-values.yaml) rather than
+  # the cluster default local-path: links.db is what connects each chat to a StudyLife account,
+  # and losing it means everyone has to /login again.
+  storageClassName: longhorn
+  resources:
+    requests: {storage: 256Mi}
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -16,16 +22,28 @@ metadata:
   namespace: studylife-telegram
 spec:
   replicas: 1
+  strategy:
+    # Single instance with an RWO volume - links.db is a plain SQLite file (store.py), not built
+    # for concurrent writers. Same reasoning as studylife-mcp.
+    type: Recreate
   selector:
     matchLabels: {app: studylife-telegram}
   template:
     metadata:
       labels: {app: studylife-telegram}
+      annotations:
+        # Opt-in to homelab-infra's nightly Velero PVC backup. The API keys inside links.db are
+        # Fernet-encrypted (store.py) precisely because this volume leaves the cluster.
+        backup.velero.io/backup-volumes: data
     spec:
       automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
+        # Makes the PVC mount group-writable by UID 1000 on first mount - without this a
+        # freshly-provisioned PersistentVolume is root-owned and the non-root container gets
+        # "Permission denied" writing to /app/data/links.db.
+        fsGroup: 1000
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: studylife-telegram
@@ -56,6 +74,12 @@ spec:
             httpGet: {path: /healthz, port: 8000}
             initialDelaySeconds: 10
             periodSeconds: 10
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+      volumes:
+        - name: data
+          persistentVolumeClaim: {claimName: studylife-telegram-data}
 ---
 apiVersion: v1
 kind: Service

@@ -38,24 +38,32 @@ MINIMUM_LOGGABLE_SECONDS = 10
 
 
 class RunTracker:
-    """Which course the current run belongs to, and when it began.
+    """Which course each chat's current run belongs to, and when it began.
 
     The timer row has no course column (TimerStateEntity), so this cannot be kept server-side.
-    In memory is sound here only because the Deployment runs a single replica; a restart
-    mid-run loses the attribution, and /stop then stays silent rather than inventing a course.
+    Keyed by chat because one process serves every connected account. In memory is sound only
+    because the Deployment runs a single replica; a restart mid-run loses the attribution, and
+    /stop then stays silent rather than inventing a course.
     """
 
-    __slots__ = ("_run",)
+    __slots__ = ("_runs",)
 
     def __init__(self) -> None:
-        self._run: tuple[int, datetime] | None = None
+        self._runs: dict[int, tuple[int, datetime]] = {}
 
-    def start(self, course_id: int | None, at: datetime) -> None:
-        self._run = None if course_id is None else (course_id, at)
+    def start(self, chat_id: int, course_id: int | None, at: datetime) -> None:
+        if course_id is None:
+            self._runs.pop(chat_id, None)
+        else:
+            self._runs[chat_id] = (course_id, at)
 
-    def finish(self) -> tuple[int, datetime] | None:
-        run, self._run = self._run, None
-        return run
+    def finish(self, chat_id: int) -> tuple[int, datetime] | None:
+        return self._runs.pop(chat_id, None)
+
+    def forget(self, chat_id: int) -> None:
+        """Called when a chat disconnects, so a pending run cannot be logged to an account the
+        chat no longer has."""
+        self._runs.pop(chat_id, None)
 
 
 # Shown in Telegram's "/" menu. Keep in sync with handle(); a command listed here but not handled
@@ -70,8 +78,15 @@ COMMANDS: list[tuple[str, str]] = [
     ("agenda", "Your next planned study sessions"),
     ("courses", "List your courses"),
     ("note", "Save a quick note"),
+    ("login", "Connect your StudyLife account"),
+    ("logout", "Disconnect this chat"),
+    ("whoami", "Which account this chat is connected to"),
     ("help", "What this bot can do"),
 ]
+
+# Answerable without a connected account. Everything else needs one, and main.py says so rather
+# than letting the command fail somewhere deeper with a confusing error.
+ACCOUNT_FREE_COMMANDS = frozenset({"login", "logout", "whoami", "help", "start"})
 
 
 class ParsedCommand:
@@ -305,6 +320,7 @@ async def handle(
     command: ParsedCommand,
     client: StudyLifeClient,
     runs: RunTracker,
+    chat_id: int,
     now: datetime,
     tz: tzinfo,
 ) -> str:
@@ -315,7 +331,7 @@ async def handle(
     a single instant, and so the tests need no clock.
     """
     try:
-        return await _dispatch(command, client, runs, now, tz)
+        return await _dispatch(command, client, runs, chat_id, now, tz)
     except StudyLifeApiError as exc:
         if exc.status_code == 403:
             return (
@@ -329,6 +345,7 @@ async def _dispatch(
     command: ParsedCommand,
     client: StudyLifeClient,
     runs: RunTracker,
+    chat_id: int,
     now: datetime,
     tz: tzinfo,
 ) -> str:
@@ -341,7 +358,7 @@ async def _dispatch(
         return format_timer(await client.get_timer_state(), now, tz)
 
     if name in ("focus", "pause", "stop"):
-        return await _timer_transition(command, client, runs, now, tz)
+        return await _timer_transition(command, client, runs, chat_id, now, tz)
 
     if name == "today":
         return format_today(
@@ -371,7 +388,12 @@ async def _dispatch(
 
 
 async def _timer_transition(
-    command: ParsedCommand, client: StudyLifeClient, runs: RunTracker, now: datetime, tz: tzinfo
+    command: ParsedCommand,
+    client: StudyLifeClient,
+    runs: RunTracker,
+    chat_id: int,
+    now: datetime,
+    tz: tzinfo,
 ) -> str:
     current = dict(await client.get_timer_state())
 
@@ -395,24 +417,24 @@ async def _timer_transition(
         # The timer row has no course column, so the course cannot ride along with the state.
         # It is remembered here and turned into a logged session on /stop, the same way the
         # VS Code integration does it.
-        runs.start(course_id, now)
+        runs.start(chat_id, course_id, now)
         if course_id is not None:
             reply = f"{reply} It will be logged to that course when you /stop."
     elif command.name == "stop":
-        note = await _log_run(runs, client, now)
+        note = await _log_run(runs, client, chat_id, now)
         if note:
             reply = f"{reply} {note}"
 
     return reply
 
 
-async def _log_run(runs: RunTracker, client: StudyLifeClient, now: datetime) -> str:
+async def _log_run(runs: RunTracker, client: StudyLifeClient, chat_id: int, now: datetime) -> str:
     """Turns a finished run into a session, or says why it did not become one.
 
     Silence would be the wrong answer here: a run that quietly fails to be logged looks
     identical to one that was, and the missing hours only surface days later in the statistics.
     """
-    run = runs.finish()
+    run = runs.finish(chat_id)
     if run is None:
         return ""
     course_id, started_at = run

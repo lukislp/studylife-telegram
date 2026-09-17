@@ -16,8 +16,9 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, tzinfo
-from typing import Any, NamedTuple, Protocol
+from typing import Any, NamedTuple
 
 from .times import parse_local
 
@@ -28,10 +29,6 @@ class Reminder(NamedTuple):
     session_id: int
     minutes_before: int
     text: str
-
-
-class Sender(Protocol):
-    async def __call__(self, text: str) -> None: ...
 
 
 def format_reminder(session: dict[str, Any], minutes: int, start: datetime) -> str:
@@ -104,32 +101,38 @@ def forget_past(
 
 
 class ReminderLoop:
-    """Polls planned sessions and sends a message as each lead time is crossed.
+    """Polls every connected account's planned sessions and messages its chat as each lead time
+    is crossed.
 
     Two intervals rather than one: /api/sessions returns the whole session list with no date
-    window (SessionService.GetAllAsync), so pulling it every tick just to notice that nothing
-    changed would be wasteful. The list is refreshed on the slower interval and evaluated
-    against the clock on the faster one. Consequence worth knowing: a session created less than
-    `refresh_seconds` before it starts may miss its earliest lead.
+    window (SessionService.GetAllAsync), so pulling it for every account on every tick would be
+    wasteful. The lists are refreshed on the slower interval and evaluated against the clock on
+    the faster one. Consequence worth knowing: a session created less than `refresh_seconds`
+    before it starts may miss its earliest lead.
+
+    Bookkeeping is per chat throughout. One account's failure - a revoked key, an instance that
+    is down - must not stop the others, so each is polled inside its own try.
     """
 
     def __init__(
         self,
-        fetch: Any,
-        send: Sender,
+        accounts: Callable[[], Awaitable[list[Any]]],
+        fetch: Callable[[Any], Awaitable[list[dict[str, Any]]]],
+        send: Callable[[int, str], Awaitable[None]],
         tz: tzinfo,
         leads: tuple[int, ...],
         tick_seconds: int = 30,
         refresh_seconds: int = 300,
     ) -> None:
+        self._accounts = accounts
         self._fetch = fetch
         self._send = send
         self._tz = tz
         self._leads = leads
         self._tick = max(5, tick_seconds)
         self._refresh = max(self._tick, refresh_seconds)
-        self._sent: set[tuple[int, int]] = set()
-        self._sessions: list[dict[str, Any]] = []
+        self._sent: dict[int, set[tuple[int, int]]] = {}
+        self._sessions: dict[int, list[dict[str, Any]]] = {}
         self._task: asyncio.Task[None] | None = None
 
     def start(self) -> None:
@@ -150,20 +153,41 @@ class ReminderLoop:
         since_refresh = self._refresh  # fetch immediately on the first pass
         while True:
             try:
+                accounts = await self._accounts()
+                live_chats = {account.chat_id for account in accounts}
+                # A chat that disconnected keeps no bookkeeping, and cannot be messaged again.
+                for chat_id in set(self._sent) - live_chats:
+                    self._sent.pop(chat_id, None)
+                    self._sessions.pop(chat_id, None)
+
                 if since_refresh >= self._refresh:
-                    self._sessions = await self._fetch()
+                    for account in accounts:
+                        await self._refresh_one(account)
                     since_refresh = 0
+
                 now = datetime.now(self._tz)
-                forget_past(self._sessions, now, self._sent, self._tz)
-                for reminder in due_reminders(
-                    self._sessions, now, self._leads, self._sent, self._tz
-                ):
-                    await self._send(reminder.text)
+                for chat_id, sessions in self._sessions.items():
+                    sent = self._sent.setdefault(chat_id, set())
+                    forget_past(sessions, now, sent, self._tz)
+                    for reminder in due_reminders(sessions, now, self._leads, sent, self._tz):
+                        await self._send(chat_id, reminder.text)
             except asyncio.CancelledError:
                 raise
             except Exception:
-                # One failed poll must not end the loop - the API being briefly unreachable is
-                # an ordinary event, and a dead task would silently stop every future reminder.
-                logger.exception("A reminder poll failed; continuing")
+                # One failed pass must not end the loop - the API being briefly unreachable is an
+                # ordinary event, and a dead task would silently stop every future reminder.
+                logger.exception("A reminder pass failed; continuing")
             await asyncio.sleep(self._tick)
             since_refresh += self._tick
+
+    async def _refresh_one(self, account: Any) -> None:
+        try:
+            self._sessions[account.chat_id] = await self._fetch(account)
+        except Exception:
+            # Keeps whatever was last known for this chat rather than dropping it: a single
+            # failed refresh should not cancel reminders that are already scheduled.
+            logger.warning(
+                "Could not refresh sessions for chat %s; keeping the previous list",
+                account.chat_id,
+                exc_info=True,
+            )

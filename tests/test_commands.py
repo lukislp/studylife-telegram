@@ -240,13 +240,17 @@ class FakeClient:
         return {"id": 1}
 
 
+CHAT = 4242
+
+
 async def run(
     command: ParsedCommand,
     client: FakeClient,
     runs: RunTracker | None = None,
     now: datetime = NOW,
+    chat_id: int = CHAT,
 ) -> str:
-    return await handle(command, client, runs or RunTracker(), now, TZ)
+    return await handle(command, client, runs or RunTracker(), chat_id, now, TZ)
 
 
 class TestNextTimerState:
@@ -359,6 +363,24 @@ class TestHandle:
         assert len(client.created) == 1
         assert client.created[0]["courseId"] == 7
         assert "Logged 25 min" in reply
+
+    async def test_runs_do_not_bleed_between_chats(self) -> None:
+        # One process now serves every connected account, so a run started in one chat must
+        # never be logged to another chat's account when that one stops.
+        client = FakeClient(courses=[{"id": 7, "name": "Mathe"}])
+        runs = RunTracker()
+        await run(ParsedCommand("focus", "Mathe"), client, runs, chat_id=111)
+        reply = await run(
+            ParsedCommand("stop", ""), client, runs, NOW + timedelta(minutes=25), chat_id=222
+        )
+        assert client.created == []
+        assert "Logged" not in reply
+        # The first chat's run is still there and still its own.
+        reply = await run(
+            ParsedCommand("stop", ""), client, runs, NOW + timedelta(minutes=25), chat_id=111
+        )
+        assert len(client.created) == 1
+        assert client.created[0]["courseId"] == 7
 
     async def test_a_run_without_a_course_logs_nothing(self) -> None:
         client = FakeClient()

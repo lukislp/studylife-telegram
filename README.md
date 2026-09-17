@@ -24,11 +24,31 @@ tray app, VS Code and Home Assistant alike — and the other way round.
 | `/agenda` | Your next planned study sessions |
 | `/courses` | List your courses |
 | `/note <text>` | Save a quick note (first line becomes the title) |
+| `/login [instance]` | Connect your StudyLife account |
+| `/logout` | Disconnect this chat |
+| `/whoami` | Which account this chat is connected to |
 | `/help` | The list above |
 
 `/focus <course>` also remembers the course: when you `/stop`, the run is written to your
 history as a session on it. Without a course the timer still runs, but nothing is logged -
 the timer row has no course column, so there would be nothing to attribute the time to.
+
+### Accounts
+
+Every chat drives its OWN StudyLife account. `/login` replies with a consent link; approving it
+in the browser sends you back to this bot, which stores the resulting API key for your chat. No
+file to edit, nothing to install.
+
+Unlike an Alexa skill, which gets an access token on every request and can stay stateless, a
+Telegram update carries only a chat id - so the mapping is kept here, in a SQLite file on a small
+volume, with the API keys encrypted at rest.
+
+Two things are deliberate:
+
+- **Direct chats only.** A group's chat id belongs to every member, including anyone added later,
+  so an account linked there would be drivable by all of them.
+- **A leaked login link is not enough to take over a chat.** The PKCE verifier never leaves the
+  bot, the state is single-use and expires in ten minutes, and the exchange needs both.
 
 ### Reminders
 
@@ -76,42 +96,56 @@ Register once through [studylife-developers](https://github.com/lukislp/studylif
 | Field | Value |
 | --- | --- |
 | Client ID | `studylife-telegram` |
-| Redirect URIs | `http://127.0.0.1:8785/callback`, `…8786…`, `…8787…`, `…8788…` |
+| Redirect URIs | `https://<your PUBLIC_BASE_URL>/connect/callback` |
 | Scopes | `TimerState.Get`, `TimerState.Save`, `Courses.GetAll`, `Metrics.GetSummary`, `Notes.Create`, `Sessions.GetAll`, `Sessions.GetHistory`, `Sessions.Create` |
 
 The three `Sessions` scopes are what make `/today`, `/agenda` and the reminders possible:
 the metrics API has no daily figure and no upcoming-session list, so both are derived from
 the session data. `Sessions.Create` writes the session a `/stop` produces.
 
-Four loopback URIs because `redirect_uri` is validated by **exact** match and the login binds
-whichever port is free. They differ from `studylife-cli`'s 8765–8768 and `studylife-vscode`'s
-8775–8778 so all three can be logged in simultaneously.
+One URI, and only one is needed: the bot always redirects to its own callback. `redirect_uri` is
+validated by **exact** match, so spell it exactly as `PUBLIC_BASE_URL` + `/connect/callback` -
+a trailing slash or a different host is refused, which is the point.
 
-### 2. Get the API key
+Earlier versions also registered loopback URIs for a local `login.py` helper that produced one
+account-wide API key. Both are gone: keys are per chat now, and `/login` obtains them from
+inside Telegram.
 
-```bash
-python -m studylife_telegram.login https://studylife.example.com
-```
-
-Opens your browser, you approve, and the key is printed. That value goes into
-`STUDYLIFE_API_KEY`. The bot never logs in itself — it runs headless and only carries the key.
-
-### 3. Create the bot
+### 2. Create the bot
 
 Talk to [@BotFather](https://t.me/BotFather), create a bot, keep the token. Get your own chat id
 from [@userinfobot](https://t.me/userinfobot).
 
-### 4. Configure
+### 3. Configure
+
+`*` `TELEGRAM_ALLOWED_CHAT_IDS` is required unless `TELEGRAM_ALLOW_ANY_CHAT` is `true`. The
+service refuses to start with neither, on purpose: an env var that silently goes missing must
+never be the thing that opens the bot to everyone. The same reasoning applies to
+`STUDYLIFE_ALLOW_ANY_INSTANCE` - without it, `/login https://somewhere-else` would make the bot
+issue requests to whatever host a stranger names, from inside the cluster network.
+
+Generate the encryption key with:
+
+```bash
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+Rotating it breaks no data, but every chat has to `/login` again.
+
 
 | Variable | Required | Meaning |
 | --- | --- | --- |
 | `TELEGRAM_BOT_TOKEN` | yes | From BotFather |
 | `TELEGRAM_WEBHOOK_SECRET` | yes | Chosen by you, passed to `setWebhook` |
-| `TELEGRAM_ALLOWED_CHAT_IDS` | yes | Comma-separated chat ids that may use the bot |
-| `STUDYLIFE_BASE_URL` | yes | Your instance |
-| `STUDYLIFE_API_KEY` | yes | From step 2 |
+| `TELEGRAM_ALLOWED_CHAT_IDS` | yes* | Comma-separated chat ids that may use the bot |
+| `TELEGRAM_ALLOW_ANY_CHAT` | no | `true` drops the allowlist: anyone may connect their own account |
+| `STUDYLIFE_BASE_URL` | yes | The default instance `/login` connects to |
+| `STUDYLIFE_EXTRA_INSTANCES` | no | Further instances users may connect to |
+| `STUDYLIFE_ALLOW_ANY_INSTANCE` | no | `true` allows any https instance |
+| `LINK_ENCRYPTION_KEY` | yes | Fernet key encrypting the stored API keys |
 | `STUDYLIFE_WEBHOOK_SECRET` | no | Enables the StudyLife → Telegram direction |
-| `PUBLIC_BASE_URL` | no | Used by the webhook registration helper |
+| `PUBLIC_BASE_URL` | yes | Where StudyLife returns to after `/login` |
+| `LINK_DB_PATH` | no | SQLite file with the chat→account links (default `/app/data/links.db`) |
 | `STUDYLIFE_TIMEZONE` | no | Zone StudyLife's timestamps mean (default `Europe/Berlin`) |
 | `SESSION_REMINDER_MINUTES` | no | Lead times before a session; empty switches reminders off |
 | `REMINDER_TICK_SECONDS` | no | How often the clock is checked (default 30) |
@@ -121,7 +155,7 @@ from [@userinfobot](https://t.me/userinfobot).
 the server's local wall clock; this container would otherwise run UTC and every reminder
 would fire an hour or two off.
 
-### 5. Point Telegram at it
+### 4. Point Telegram at it
 
 Telegram only delivers to HTTPS with a valid certificate:
 
@@ -138,6 +172,7 @@ curl -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
 | --- | --- |
 | `POST /telegram` | Updates from Telegram |
 | `POST /webhooks/studylife` | StudyLife's outgoing webhooks |
+| `GET /connect/callback` | Where StudyLife returns from a `/login` approval |
 | `GET /healthz` | Liveness/readiness probe |
 
 Both inbound routes answer `200` for anything they choose to ignore. Telegram retries a non-2xx

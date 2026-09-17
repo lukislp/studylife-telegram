@@ -154,7 +154,7 @@ class TestReminderLeads:
             telegram_webhook_secret="s",
             telegram_allowed_chat_ids="1",
             studylife_base_url="https://example.invalid",
-            studylife_api_key="k",
+            link_encryption_key="k",
             session_reminder_minutes=value,
         )
 

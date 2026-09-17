@@ -1,11 +1,17 @@
-"""FastAPI app: two inbound routes, both authenticated, plus a health probe.
+"""FastAPI app: three inbound routes, plus a health probe.
 
   POST /telegram           - updates from Telegram (secret token + chat allowlist)
+  GET  /connect/callback   - where StudyLife returns from a /login approval
   POST /webhooks/studylife - StudyLife's outgoing webhooks (HMAC-SHA256 over the raw body)
 
-Both answer 200 for anything they choose not to act on. Telegram retries a non-2xx and
-eventually disables the webhook, and StudyLife's delivery service does the same - so "received
-but ignored" must never look like a failure.
+The Telegram and StudyLife routes answer 200 for anything they choose not to act on. Telegram
+retries a non-2xx and eventually disables the webhook, and StudyLife's delivery service does the
+same - so "received but ignored" must never look like a failure.
+
+Each chat acts on its OWN StudyLife account: the link is looked up per update (store.py), and no
+account is configured process-wide. Alexa can stay stateless here because Amazon carries an
+access token on every request; a Telegram update carries only a chat id, so the mapping has to
+live on this side.
 """
 
 from __future__ import annotations
@@ -15,13 +21,27 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import datetime
 from functools import lru_cache
+from html import escape
 from typing import Any
 
 from fastapi import FastAPI, Header, Request, Response
+from fastapi.responses import HTMLResponse
 
-from .commands import RunTracker, handle, parse_command
+from .commands import ACCOUNT_FREE_COMMANDS, RunTracker, format_help, handle, parse_command
 from .config import Settings
+from .linking import (
+    LinkError,
+    build_connect_url,
+    callback_url,
+    exchange_assertion,
+    instance_allowed,
+    is_private_chat,
+    new_pkce_pair,
+    new_state,
+    normalise_instance,
+)
 from .reminders import ReminderLoop
+from .store import LinkedAccount, LinkStore, PendingLink
 from .studylife_client import StudyLifeClient
 from .telegram_client import TelegramApiError, TelegramClient
 from .times import zone
@@ -34,6 +54,8 @@ from .verify import (
 
 logger = logging.getLogger(__name__)
 
+CLIENT_ID = "studylife-telegram"
+
 
 @lru_cache
 def get_settings() -> Settings:
@@ -43,16 +65,22 @@ def get_settings() -> Settings:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
-    if not settings.allowed_chat_ids:
-        # Failing at startup rather than serving: an empty allowlist means every command would
-        # be rejected, which looks like a broken bot instead of a misconfigured one.
+    if not settings.telegram_allow_any_chat and not settings.allowed_chat_ids:
+        # Failing at startup rather than serving: an empty allowlist means every update would be
+        # rejected, which looks like a broken bot instead of a misconfigured one. Serving
+        # everybody instead would be far worse, which is why that needs its own explicit flag.
         raise RuntimeError(
-            "TELEGRAM_ALLOWED_CHAT_IDS parsed to an empty set - the bot would answer nobody."
+            "TELEGRAM_ALLOWED_CHAT_IDS parsed to an empty set and TELEGRAM_ALLOW_ANY_CHAT is "
+            "off - the bot would answer nobody."
         )
-    app.state.studylife = StudyLifeClient(
-        str(settings.studylife_base_url), settings.studylife_api_key
-    )
+    if settings.public_base_url is None:
+        # /login cannot be offered without it, and a bot whose only way in is unavailable is
+        # worth failing on rather than discovering in a chat.
+        raise RuntimeError("PUBLIC_BASE_URL is required: /login redirects back to it.")
+
     app.state.telegram = TelegramClient(settings.telegram_bot_token)
+    app.state.store = LinkStore(settings.link_db_path, settings.link_encryption_key)
+    await app.state.store.open()
     app.state.runs = RunTracker()
     app.state.tz = zone(settings.studylife_timezone)
 
@@ -60,8 +88,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # (see WebhookEventTypes - its catalogue is reactive), so the bot has to watch the clock
     # itself, exactly as the app's own client does from UserSettings.SessionReminderMinutes.
     app.state.reminders = ReminderLoop(
-        fetch=app.state.studylife.list_sessions,
-        send=lambda text: _broadcast(app, text),
+        accounts=app.state.store.all_links,
+        fetch=_fetch_sessions,
+        send=lambda chat_id, text: _send(app.state.telegram, chat_id, text),
         tz=app.state.tz,
         leads=settings.reminder_leads,
         tick_seconds=settings.reminder_tick_seconds,
@@ -72,19 +101,25 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         await app.state.reminders.stop()
-        await app.state.studylife.aclose()
+        await app.state.store.close()
         await app.state.telegram.aclose()
 
 
-async def _broadcast(app: FastAPI, text: str) -> None:
-    """Sends to every allowed chat. With the usual single-chat allowlist that is one message,
-    and it is the allowlist - not a separately configured target - so a reminder can never
-    reach a chat that is not permitted to drive the account either."""
-    for chat_id in sorted(get_settings().allowed_chat_ids):
-        await _send(app.state.telegram, chat_id, text)
-
-
 app = FastAPI(lifespan=lifespan, title="studylife-telegram")
+
+
+def _client(account: LinkedAccount) -> StudyLifeClient:
+    """A client for one account.
+
+    Built per use rather than cached: a cache keyed by the API key would go on serving a key
+    that /login has just rotated, and this bot's traffic is a handful of requests per minute.
+    """
+    return StudyLifeClient(account.instance_url, account.api_key)
+
+
+async def _fetch_sessions(account: LinkedAccount) -> list[dict[str, Any]]:
+    async with _client(account) as client:
+        return await client.list_sessions()
 
 
 @app.get("/healthz")
@@ -115,23 +150,139 @@ async def telegram_update(
     # Narrowed to int here rather than at the call site, so the allowlist check and the reply
     # provably talk about the same value.
     chat_id = raw_chat_id if isinstance(raw_chat_id, int) else None
-    if chat_id is None or not is_allowed_chat(settings.allowed_chat_ids, chat_id):
+    if chat_id is None:
+        return Response(status_code=200)
+    if not settings.telegram_allow_any_chat and not is_allowed_chat(
+        settings.allowed_chat_ids, chat_id
+    ):
         logger.warning("Ignored an update from chat %s, which is not in the allowlist", chat_id)
+        return Response(status_code=200)
+    if not is_private_chat(chat):
+        # See linking.is_private_chat: a group's id belongs to everyone in it.
+        await _send(request.app.state.telegram, chat_id, "This bot only works in a direct chat.")
         return Response(status_code=200)
 
     command = parse_command(message.get("text"))
     if command is None:
         return Response(status_code=200)
 
-    reply = await handle(
-        command,
-        request.app.state.studylife,
-        request.app.state.runs,
-        datetime.now(request.app.state.tz),
-        request.app.state.tz,
-    )
+    reply = await _run_command(request.app, command, chat_id)
     await _send(request.app.state.telegram, chat_id, reply)
     return Response(status_code=200)
+
+
+async def _run_command(app: FastAPI, command: Any, chat_id: int) -> str:
+    settings = get_settings()
+    store: LinkStore = app.state.store
+
+    if command.name == "login":
+        return await _start_login(store, settings, chat_id, command.argument)
+    if command.name == "logout":
+        app.state.runs.forget(chat_id)
+        return (
+            "Disconnected. The API key stays valid on StudyLife until you revoke it there."
+            if await store.unlink(chat_id)
+            else "This chat is not connected."
+        )
+    if command.name == "whoami":
+        account = await store.get(chat_id)
+        if account is None:
+            return "Not connected. Send /login to connect your StudyLife account."
+        who = f" as user {account.studylife_user_id}" if account.studylife_user_id else ""
+        return f"Connected to {account.instance_url}{who}."
+
+    if command.name in ACCOUNT_FREE_COMMANDS:
+        # Only /help and /start reach here; the three linking commands are handled above.
+        return format_help()
+
+    account = await store.get(chat_id)
+    if account is None:
+        return "Not connected. Send /login to connect your StudyLife account."
+    async with _client(account) as client:
+        return await handle(
+            command,
+            client,
+            app.state.runs,
+            chat_id,
+            datetime.now(app.state.tz),
+            app.state.tz,
+        )
+
+
+async def _start_login(store: LinkStore, settings: Settings, chat_id: int, argument: str) -> str:
+    instance = normalise_instance(argument or str(settings.studylife_base_url))
+    if not instance_allowed(
+        instance, settings.allowed_instances, settings.studylife_allow_any_instance
+    ):
+        return (
+            f"This bot does not connect to {instance}. "
+            f"Send /login on its own to use {normalise_instance(str(settings.studylife_base_url))}."
+        )
+
+    verifier, challenge = new_pkce_pair()
+    state = new_state()
+    await store.put_pending(
+        PendingLink(state=state, chat_id=chat_id, code_verifier=verifier, instance_url=instance)
+    )
+    url = build_connect_url(
+        instance,
+        CLIENT_ID,
+        callback_url(str(settings.public_base_url)),
+        state,
+        challenge,
+    )
+    return (
+        "Open this to approve the connection - the link works once and expires in 10 minutes. "
+        "Do not forward it.\n\n" + url
+    )
+
+
+@app.get("/connect/callback")
+async def connect_callback(request: Request, state: str = "", assertion: str = "") -> Response:
+    """Where StudyLife sends the browser after a /login approval.
+
+    Public by necessity - the whole point is that it works from a phone. The state is what binds
+    this callback to a chat, and it is single-use; the PKCE verifier it carries never left this
+    process, so a stolen assertion alone redeems nothing.
+
+    The page says as little as possible either way: it is rendered in whatever browser the user
+    opened, and the real answer is delivered to the chat.
+    """
+    store: LinkStore = request.app.state.store
+    pending = await store.take_pending(state) if state else None
+    if pending is None or not assertion:
+        return _page(
+            "Could not connect", "That link is expired or already used. Send /login again."
+        )
+
+    try:
+        api_key, user_id = await exchange_assertion(
+            pending.instance_url, CLIENT_ID, assertion, pending.code_verifier
+        )
+    except LinkError as exc:
+        # The reason goes to the chat, which is authenticated; the page says nothing about it.
+        # This endpoint is on the public internet, and even a status code echoed back here
+        # tells a caller something about an instance they may have no business knowing about.
+        await _send(request.app.state.telegram, pending.chat_id, str(exc))
+        return _page("Could not connect", "Your chat has the details.")
+
+    await store.link(pending.chat_id, api_key, pending.instance_url, user_id)
+    await _send(
+        request.app.state.telegram,
+        pending.chat_id,
+        f"Connected to {pending.instance_url}. Try /status or /today.",
+    )
+    return _page("Connected", "You can close this tab - the bot has replied in your chat.")
+
+
+def _page(title: str, body: str) -> HTMLResponse:
+    """A fixed, tiny page. Both arguments are constants today; they are escaped anyway so that
+    adding a dynamic one later cannot quietly turn this public route into an injection point."""
+    return HTMLResponse(
+        "<!doctype html><meta charset=utf-8>"
+        f"<title>StudyLife</title><body style='font-family:system-ui;padding:3rem;"
+        f"text-align:center'><h1>{escape(title)}</h1><p>{escape(body)}</p>"
+    )
 
 
 @app.post("/webhooks/studylife")
@@ -156,8 +307,12 @@ async def studylife_webhook(
 
     text = _announcement_text(payload)
     if text:
-        for chat_id in sorted(settings.allowed_chat_ids):
-            await _send(request.app.state.telegram, chat_id, text)
+        # Broadcast to every connected chat. This endpoint carries no account identity - the
+        # signature proves only that SOME StudyLife instance sent it - so it is only meaningful
+        # in a single-account deployment. Left in place for that case; a multi-account
+        # deployment should leave STUDYLIFE_WEBHOOK_SECRET unset, which disables the route.
+        for account in await request.app.state.store.all_links():
+            await _send(request.app.state.telegram, account.chat_id, text)
     return Response(status_code=200)
 
 
