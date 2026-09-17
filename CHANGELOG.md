@@ -1,3 +1,10 @@
+## [1.2.1](https://github.com/lukislp/studylife-telegram/compare/v1.2.0...v1.2.1) (2026-09-17)
+
+
+### Bug Fixes
+
+* route /connect/callback through the funnel ([#12](https://github.com/lukislp/studylife-telegram/issues/12)) ([1f9f810](https://github.com/lukislp/studylife-telegram/commit/1f9f810a08dee2156986e4f51019dd7dfd661fd0))
+
 # [1.2.0](https://github.com/lukislp/studylife-telegram/compare/v1.1.0...v1.2.0) (2026-09-17)
 
 
