@@ -21,6 +21,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import datetime
 from functools import lru_cache
+from html import escape
 from typing import Any
 
 from fastapi import FastAPI, Header, Request, Response
@@ -259,8 +260,11 @@ async def connect_callback(request: Request, state: str = "", assertion: str = "
             pending.instance_url, CLIENT_ID, assertion, pending.code_verifier
         )
     except LinkError as exc:
+        # The reason goes to the chat, which is authenticated; the page says nothing about it.
+        # This endpoint is on the public internet, and even a status code echoed back here
+        # tells a caller something about an instance they may have no business knowing about.
         await _send(request.app.state.telegram, pending.chat_id, str(exc))
-        return _page("Could not connect", str(exc))
+        return _page("Could not connect", "Your chat has the details.")
 
     await store.link(pending.chat_id, api_key, pending.instance_url, user_id)
     await _send(
@@ -272,10 +276,12 @@ async def connect_callback(request: Request, state: str = "", assertion: str = "
 
 
 def _page(title: str, body: str) -> HTMLResponse:
+    """A fixed, tiny page. Both arguments are constants today; they are escaped anyway so that
+    adding a dynamic one later cannot quietly turn this public route into an injection point."""
     return HTMLResponse(
         "<!doctype html><meta charset=utf-8>"
         f"<title>StudyLife</title><body style='font-family:system-ui;padding:3rem;"
-        f"text-align:center'><h1>{title}</h1><p>{body}</p>"
+        f"text-align:center'><h1>{escape(title)}</h1><p>{escape(body)}</p>"
     )
 
 
