@@ -1,3 +1,10 @@
+# [1.1.0](https://github.com/lukislp/studylife-telegram/compare/v1.0.1...v1.1.0) (2026-09-17)
+
+
+### Features
+
+* remind about upcoming sessions and fix today's hours ([#10](https://github.com/lukislp/studylife-telegram/issues/10)) ([ac20ed5](https://github.com/lukislp/studylife-telegram/commit/ac20ed5dc20057569bfcd4c7fdfa3a595de7e13e))
+
 ## [1.0.1](https://github.com/lukislp/studylife-telegram/compare/v1.0.0...v1.0.1) (2026-09-16)
 
 
