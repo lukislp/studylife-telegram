@@ -1,0 +1,42 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "Kubernetes image tags only - Dependabot already covers the Dockerfile, pyproject/uv.lock and GitHub Actions, but has no Kubernetes manager. This repo's own image (ghcr.io/lukislp/studylife-telegram) is written into k8s/ by the deploy-bump job on every release and is excluded here, so the two never compete for the same tag. That currently leaves nothing to update - k8s/ carries no third-party image yet - and this config exists so the first sidecar or init container added there is picked up without anyone having to remember to wire it up.",
+  "extends": [
+    "config:recommended",
+    ":disableDependencyDashboard"
+  ],
+  "enabledManagers": [
+    "kubernetes"
+  ],
+  "kubernetes": {
+    "managerFilePatterns": [
+      "/^k8s/.+\\.ya?ml$/"
+    ]
+  },
+  "semanticCommits": "enabled",
+  "semanticCommitType": "chore",
+  "semanticCommitScope": "k8s",
+  "labels": [
+    "dependencies",
+    "kubernetes"
+  ],
+  "schedule": [
+    "at any time"
+  ],
+  "packageRules": [
+    {
+      "matchPackageNames": [
+        "/^ghcr\\.io/lukislp//"
+      ],
+      "enabled": false
+    },
+    {
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "digest"
+      ],
+      "groupName": "kubernetes image tags"
+    }
+  ]
+}
