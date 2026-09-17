@@ -51,8 +51,8 @@ jobs:
 
   # ---------------------------------------------------------------------
   # Version / image / release - push to main only, mirrors studylife-alexa's/
-  # studylife-webhooks' own ci.yml pattern: semantic-release drives the version, Flux
-  # picks up the resulting GHCR tag via ImagePolicy.
+  # studylife-webhooks' own ci.yml pattern: semantic-release drives the version, the
+  # deploy-bump job writes the resulting tag into k8s/, and Flux reconciles it from there.
   # ---------------------------------------------------------------------
   get-version:
     needs: [lint, test]
@@ -244,6 +244,55 @@ jobs:
           severity: CRITICAL
           ignore-unfixed: true
           exit-code: "1"
+
+  deploy-bump:
+    needs: [get-version, docker-manifest-merge, trivy]
+    if: github.event_name == 'push' && needs.get-version.outputs.published == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: studylife-telegram-release-chain
+      cancel-in-progress: false
+    permissions:
+      contents: read
+    env:
+      NEXT_VERSION: ${{ needs.get-version.outputs.next_version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+      # Same deploy-key push as the release jobs - the default branch only takes direct pushes
+      # from that key, so this job cannot fall back to GITHUB_TOKEN.
+      - name: Push as the semantic-release deploy key
+        uses: lukislp/ci-workflows/.github/actions/deploy-key-push@d44f7d506a81c2b2ae01ccecc755611df2516142 # v1.5.1
+        with:
+          deploy-key: ${{ secrets.SEMANTIC_RELEASE_DEPLOY_KEY }}
+          required: "true"
+      - name: Point the manifests at the released image and push
+        # k8s/flux/ is excluded on purpose: it holds Flux's own resources, which never carry an
+        # image reference. Matches studylife-webhooks' and studylife-alexa's job exactly.
+        run: |
+          set -eu
+          for f in $(grep -rlE 'ghcr\.io/lukislp/(studylife-telegram):' k8s --include='*.yaml' | grep -v '/flux/'); do
+            sed -i -E "s#(ghcr\.io/lukislp/(studylife-telegram)):[0-9A-Za-z._-]+#\1:${NEXT_VERSION}#g" "$f"
+          done
+          if git diff --quiet; then
+            echo "manifests already reference ${NEXT_VERSION}"
+            exit 0
+          fi
+          git diff --stat
+          git config user.name "studylife-telegram-deploy"
+          git config user.email "deploy@studylife.local"
+          git commit -am "chore(deploy): image ${NEXT_VERSION} [skip ci]"
+          # The branch may have moved (an out-of-band push) between checkout and now - rebase, retry.
+          for attempt in 1 2 3; do
+            git push origin HEAD:main && exit 0
+            git fetch origin main
+            git rebase origin/main
+          done
+          echo "::error::could not push the image tag bump"
+          exit 1
 
   semantic-release:
     needs: [get-version]

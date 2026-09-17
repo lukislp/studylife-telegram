@@ -29,10 +29,18 @@ spec:
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: studylife-telegram
-          image: ghcr.io/lukislp/studylife-telegram:0.1.0 # {"$imagepolicy": "flux-system:studylife-telegram"}
+          image: ghcr.io/lukislp/studylife-telegram:1.0.1 # set by the deploy-bump job (CI) on every release
           securityContext:
             allowPrivilegeEscalation: false
             capabilities: {drop: ["ALL"]}
+          env:
+            # StudySessionDto.StartTime/EndTime are the server's LOCAL wall clock with no offset
+            # in the JSON (SessionService deliberately uses DateTime.Now, see the comment on
+            # GetHistoryAsync). studylife-web runs Europe/Berlin, so this pod has to agree or
+            # every session reminder would fire two hours off. reminders.py does not rely on
+            # this alone - it converts explicitly via STUDYLIFE_TIMEZONE - but keeping the
+            # container clock in the same zone means logs and timestamps read the same too.
+            - {name: TZ, value: Europe/Berlin}
           envFrom:
             - secretRef: {name: studylife-telegram-secrets}
           ports:

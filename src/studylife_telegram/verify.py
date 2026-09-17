@@ -16,7 +16,19 @@ import hmac
 # Events this bot turns into a chat message. Everything else StudyLife may send is accepted
 # (signature checked, 200 returned) and silently ignored, so adding an event type upstream never
 # makes deliveries start failing here.
-_ANNOUNCED_EVENTS = frozenset({"timer.started", "timer.ended", "session.completed", "goal.due"})
+# Every name here exists in the server's own catalogue (WebhookEventTypes.cs). That is not a
+# formality: "goal.due" used to sit in this set and can never arrive, because StudyLife has no
+# such event - the branch was unreachable and nothing reported it.
+_ANNOUNCED_EVENTS = frozenset(
+    {
+        "timer.started",
+        "timer.ended",
+        "session.completed",
+        "course_goal.completed",
+        "new_record.set",
+        "plan.generated",
+    }
+)
 
 
 def verify_telegram_secret(expected: str, received: str | None) -> bool:
