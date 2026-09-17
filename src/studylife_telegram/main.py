@@ -57,6 +57,29 @@ logger = logging.getLogger(__name__)
 CLIENT_ID = "studylife-telegram"
 
 
+class RedactCallbackQuery(logging.Filter):
+    """Keeps the assertion out of uvicorn's access log.
+
+    It arrives as a query parameter and uvicorn logs the whole request line. The assertion is
+    single-use and worthless without the PKCE verifier, which never leaves this process, so this
+    is hygiene rather than a hole - but a credential still has no business in a log that gets
+    tailed, shipped and pasted into issues.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.args, tuple):
+            record.args = tuple(
+                a.split("?", 1)[0] + "?<redacted>"
+                if isinstance(a, str) and a.startswith("/connect/callback?")
+                else a
+                for a in record.args
+            )
+        return True
+
+
+logging.getLogger("uvicorn.access").addFilter(RedactCallbackQuery())
+
+
 @lru_cache
 def get_settings() -> Settings:
     return Settings()  # type: ignore[call-arg]
@@ -231,9 +254,15 @@ async def _start_login(store: LinkStore, settings: Settings, chat_id: int, argum
         state,
         challenge,
     )
+    # The browser hint is not decoration. Telegram's built-in browser reports WebAuthn as
+    # supported but cannot reach the platform authenticator, so StudyLife's passkey sign-in
+    # fails there with a generic "Anmeldung hat nicht geklappt" that names no cause. Everyone
+    # using this bot would hit it exactly once and have no way to work out why.
     return (
-        "Open this to approve the connection - the link works once and expires in 10 minutes. "
-        "Do not forward it.\n\n" + url
+        "Open this in your browser to approve the connection.\n\n"
+        "Long-press the link and open it in Safari or Chrome - Telegram's built-in browser "
+        "cannot use passkeys, and the sign-in will just fail there without saying why.\n\n"
+        "The link works once and expires in 10 minutes. Do not forward it.\n\n" + url
     )
 
 
