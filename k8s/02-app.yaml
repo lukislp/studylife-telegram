@@ -47,7 +47,7 @@ spec:
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: studylife-telegram
-          image: ghcr.io/lukislp/studylife-telegram:1.1.0 # set by the deploy-bump job (CI) on every release
+          image: ghcr.io/lukislp/studylife-telegram:1.2.0 # set by the deploy-bump job (CI) on every release
           securityContext:
             allowPrivilegeEscalation: false
             capabilities: {drop: ["ALL"]}
