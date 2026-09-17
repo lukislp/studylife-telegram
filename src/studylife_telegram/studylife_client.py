@@ -7,6 +7,7 @@ then fails with 403 on every request, which is a confusing way to find out.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 import httpx
@@ -62,6 +63,50 @@ class StudyLifeClient:
         calculates them (see MetricsController). Recomputing any of them locally would
         eventually disagree with the web app over some edge case nobody thought to check."""
         return dict((await self._request("GET", "/api/metrics/summary")).json())
+
+    async def list_sessions(self) -> list[dict[str, Any]]:
+        """Every session the account has, planned and past (SessionService.GetAllAsync applies
+        no date window). Used by the reminder loop, which filters to the future itself - there
+        is no "upcoming only" endpoint, and /api/sessions/history returns the past."""
+        return list((await self._request("GET", "/api/sessions")).json())
+
+    async def get_session_history(
+        self, days: int = 2, only_completed: bool = True
+    ) -> list[dict[str, Any]]:
+        """Recent sessions, used to sum today's hours. Two days rather than one because the
+        server's window is day-aligned on its side and the sum is clipped to the local day
+        here; asking for one day can miss a session that began late yesterday."""
+        response = await self._request(
+            "GET",
+            "/api/sessions/history",
+            params={"days": days, "onlyCompleted": str(only_completed).lower()},
+        )
+        return list(response.json())
+
+    async def create_session(
+        self,
+        course_id: int,
+        start_time: datetime,
+        end_time: datetime,
+        topic: str | None = None,
+    ) -> dict[str, Any]:
+        """Writes a finished study session.
+
+        isCompleted is true because this records time already spent, not a plan. The timestamps
+        are sent WITHOUT an offset: StudySessionDto.StartTime is a naive local DateTime and the
+        server compares it against DateTime.Now, so an offset-carrying value would land in the
+        wrong hour (see times.py).
+        """
+        payload: dict[str, Any] = {
+            "courseId": course_id,
+            "startTime": start_time.replace(tzinfo=None).isoformat(timespec="seconds"),
+            "endTime": end_time.replace(tzinfo=None).isoformat(timespec="seconds"),
+            "isCompleted": True,
+            "timerModeId": 1,
+        }
+        if topic:
+            payload["topic"] = topic
+        return dict((await self._request("POST", "/api/sessions", json=payload)).json())
 
     async def create_note(self, title: str, content: str) -> dict[str, Any]:
         response = await self._request(

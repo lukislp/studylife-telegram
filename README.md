@@ -21,9 +21,31 @@ tray app, VS Code and Home Assistant alike — and the other way round.
 | `/stop` | Stop it |
 | `/today` | Hours today and this week, plus the current streak |
 | `/next` | Next course goal and its countdown |
+| `/agenda` | Your next planned study sessions |
 | `/courses` | List your courses |
 | `/note <text>` | Save a quick note (first line becomes the title) |
 | `/help` | The list above |
+
+`/focus <course>` also remembers the course: when you `/stop`, the run is written to your
+history as a session on it. Without a course the timer still runs, but nothing is logged -
+the timer row has no course column, so there would be nothing to attribute the time to.
+
+### Reminders
+
+The bot messages you before each planned session, at the same lead times StudyLife itself
+uses (`60,30,10,5,3,2,1` minutes by default). This is polled rather than pushed: StudyLife
+publishes no "a session is about to start" event - its webhook catalogue is reactive
+(`session.created` fires when you PLAN a session, not when it comes due), so the bot watches
+the clock itself, exactly as the web app's own client does.
+
+Worth knowing:
+
+- The session list is re-read every `REMINDER_REFRESH_SECONDS`, so a session created only a
+  few minutes before it starts may miss its earliest lead time.
+- Only the nearest lead is ever sent. After a restart shortly before a session you get one
+  message, not the whole ladder of them.
+- Reminders go to the same allowlist that may drive the account - never to a separately
+  configured target.
 
 `/focus Betriebssysteme` matches case-insensitively, exact name first, then unique prefix. An
 **ambiguous** prefix is refused rather than guessed: putting study time on the wrong course would
@@ -55,7 +77,11 @@ Register once through [studylife-developers](https://github.com/lukislp/studylif
 | --- | --- |
 | Client ID | `studylife-telegram` |
 | Redirect URIs | `http://127.0.0.1:8785/callback`, `…8786…`, `…8787…`, `…8788…` |
-| Scopes | `TimerState.Get`, `TimerState.Save`, `Courses.GetAll`, `Metrics.GetSummary`, `Notes.Create` |
+| Scopes | `TimerState.Get`, `TimerState.Save`, `Courses.GetAll`, `Metrics.GetSummary`, `Notes.Create`, `Sessions.GetAll`, `Sessions.GetHistory`, `Sessions.Create` |
+
+The three `Sessions` scopes are what make `/today`, `/agenda` and the reminders possible:
+the metrics API has no daily figure and no upcoming-session list, so both are derived from
+the session data. `Sessions.Create` writes the session a `/stop` produces.
 
 Four loopback URIs because `redirect_uri` is validated by **exact** match and the login binds
 whichever port is free. They differ from `studylife-cli`'s 8765–8768 and `studylife-vscode`'s
@@ -86,6 +112,14 @@ from [@userinfobot](https://t.me/userinfobot).
 | `STUDYLIFE_API_KEY` | yes | From step 2 |
 | `STUDYLIFE_WEBHOOK_SECRET` | no | Enables the StudyLife → Telegram direction |
 | `PUBLIC_BASE_URL` | no | Used by the webhook registration helper |
+| `STUDYLIFE_TIMEZONE` | no | Zone StudyLife's timestamps mean (default `Europe/Berlin`) |
+| `SESSION_REMINDER_MINUTES` | no | Lead times before a session; empty switches reminders off |
+| `REMINDER_TICK_SECONDS` | no | How often the clock is checked (default 30) |
+| `REMINDER_REFRESH_SECONDS` | no | How often the session list is re-read (default 300) |
+
+`STUDYLIFE_TIMEZONE` is not cosmetic. StudyLife's timestamps carry no UTC offset and mean
+the server's local wall clock; this container would otherwise run UTC and every reminder
+would fire an hour or two off.
 
 ### 5. Point Telegram at it
 

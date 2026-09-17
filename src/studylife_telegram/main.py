@@ -13,15 +13,18 @@ from __future__ import annotations
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import datetime
 from functools import lru_cache
 from typing import Any
 
 from fastapi import FastAPI, Header, Request, Response
 
-from .commands import handle, parse_command
+from .commands import RunTracker, handle, parse_command
 from .config import Settings
+from .reminders import ReminderLoop
 from .studylife_client import StudyLifeClient
 from .telegram_client import TelegramApiError, TelegramClient
+from .times import zone
 from .verify import (
     is_allowed_chat,
     verify_studylife_signature,
@@ -50,11 +53,35 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         str(settings.studylife_base_url), settings.studylife_api_key
     )
     app.state.telegram = TelegramClient(settings.telegram_bot_token)
+    app.state.runs = RunTracker()
+    app.state.tz = zone(settings.studylife_timezone)
+
+    # Reminders for planned sessions. StudyLife publishes no "session is about to start" event
+    # (see WebhookEventTypes - its catalogue is reactive), so the bot has to watch the clock
+    # itself, exactly as the app's own client does from UserSettings.SessionReminderMinutes.
+    app.state.reminders = ReminderLoop(
+        fetch=app.state.studylife.list_sessions,
+        send=lambda text: _broadcast(app, text),
+        tz=app.state.tz,
+        leads=settings.reminder_leads,
+        tick_seconds=settings.reminder_tick_seconds,
+        refresh_seconds=settings.reminder_refresh_seconds,
+    )
+    app.state.reminders.start()
     try:
         yield
     finally:
+        await app.state.reminders.stop()
         await app.state.studylife.aclose()
         await app.state.telegram.aclose()
+
+
+async def _broadcast(app: FastAPI, text: str) -> None:
+    """Sends to every allowed chat. With the usual single-chat allowlist that is one message,
+    and it is the allowlist - not a separately configured target - so a reminder can never
+    reach a chat that is not permitted to drive the account either."""
+    for chat_id in sorted(get_settings().allowed_chat_ids):
+        await _send(app.state.telegram, chat_id, text)
 
 
 app = FastAPI(lifespan=lifespan, title="studylife-telegram")
@@ -96,7 +123,13 @@ async def telegram_update(
     if command is None:
         return Response(status_code=200)
 
-    reply = await handle(command, request.app.state.studylife)
+    reply = await handle(
+        command,
+        request.app.state.studylife,
+        request.app.state.runs,
+        datetime.now(request.app.state.tz),
+        request.app.state.tz,
+    )
     await _send(request.app.state.telegram, chat_id, reply)
     return Response(status_code=200)
 
@@ -140,8 +173,12 @@ def _announcement_text(payload: dict[str, Any]) -> str:
         return f"Focus session ended{suffix}."
     if event == "session.completed":
         return f"Session logged{suffix}."
-    if event == "goal.due":
-        return f"Course goal due{suffix}."
+    if event == "course_goal.completed":
+        return f"Course goal completed{suffix}."
+    if event == "new_record.set":
+        return f"New record - longest session so far{suffix}."
+    if event == "plan.generated":
+        return "A new study plan was generated."
     return ""
 
 
