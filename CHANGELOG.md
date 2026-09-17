@@ -1,3 +1,10 @@
+## [1.2.2](https://github.com/lukislp/studylife-telegram/compare/v1.2.1...v1.2.2) (2026-09-17)
+
+
+### Bug Fixes
+
+* tell people to leave Telegram's browser for /login ([#13](https://github.com/lukislp/studylife-telegram/issues/13)) ([c7016fb](https://github.com/lukislp/studylife-telegram/commit/c7016fbcdc7eafb99e4a474dd05ce05994dad8ac))
+
 ## [1.2.1](https://github.com/lukislp/studylife-telegram/compare/v1.2.0...v1.2.1) (2026-09-17)
 
 
