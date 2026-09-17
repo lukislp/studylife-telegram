@@ -11,9 +11,10 @@
 # what actually lets its traffic reach the pod.
 #
 # Explicit path allowlist, NOT a defaultBackend: /telegram (Telegram's servers deliver every
-# update here) and /webhooks/studylife (StudyLife's servers call this for session and goal
-# events). /healthz is deliberately absent - operator-only, no
-# reason to be internet-facing.
+# update here), /webhooks/studylife (StudyLife's servers call this for session and goal
+# events) and /connect/callback (where a user's BROWSER lands after approving /login - the
+# only one of the three a person ever sees). /healthz is deliberately absent - operator-only,
+# no reason to be internet-facing.
 #
 # Bootstrap-only, NOT Flux-managed - same RBAC reasoning as k8s/00-namespace.yaml/
 # k8s/01-secret.yaml/k8s/03-network-policies.yaml (kustomize-controller's ClusterRole has no
@@ -39,6 +40,9 @@ spec:
             pathType: Prefix
             backend: {service: {name: studylife-telegram, port: {number: 8000}}}
           - path: /webhooks/studylife
+            pathType: Prefix
+            backend: {service: {name: studylife-telegram, port: {number: 8000}}}
+          - path: /connect/callback
             pathType: Prefix
             backend: {service: {name: studylife-telegram, port: {number: 8000}}}
   tls:
