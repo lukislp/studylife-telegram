@@ -2,6 +2,7 @@ import hashlib
 import hmac
 
 from studylife_telegram.verify import (
+    _ANNOUNCED_EVENTS,
     is_allowed_chat,
     verify_studylife_signature,
     verify_telegram_secret,
@@ -68,8 +69,44 @@ class TestChatAllowlist:
 
 class TestAnnouncementFilter:
     def test_accepts_the_announced_events(self) -> None:
-        for event in ("timer.started", "timer.ended", "session.completed", "goal.due"):
+        for event in (
+            "timer.started",
+            "timer.ended",
+            "session.completed",
+            "course_goal.completed",
+            "new_record.set",
+            "plan.generated",
+        ):
             assert wants_announcement(event) is True
+
+    def test_every_announced_event_exists_in_the_servers_catalogue(self) -> None:
+        # "goal.due" used to be in this set and is not a StudyLife event at all
+        # (WebhookEventTypes.cs), so that branch could never run and nothing said so. This list
+        # is transcribed from that file; a name not on it is a name that will never arrive.
+        catalogue = {
+            "timer.started",
+            "timer.ended",
+            "session.created",
+            "session.completed",
+            "session.deleted",
+            "new_record.set",
+            "note.created",
+            "note.updated",
+            "note.deleted",
+            "course_goal.created",
+            "course_goal.updated",
+            "course_goal.completed",
+            "course_goal.deleted",
+            "course_resource.created",
+            "course_resource.deleted",
+            "session_template.created",
+            "session_template.deleted",
+            "study_program.created",
+            "study_program.completed",
+            "study_program.deleted",
+            "plan.generated",
+        }
+        assert catalogue >= _ANNOUNCED_EVENTS
 
     def test_ignores_anything_else_without_raising(self) -> None:
         assert wants_announcement("note.created") is False

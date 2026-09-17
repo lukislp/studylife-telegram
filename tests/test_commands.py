@@ -1,19 +1,32 @@
+from datetime import datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pytest
 
 from studylife_telegram.commands import (
     ParsedCommand,
+    RunTracker,
     _find_course_id,
+    format_agenda,
     format_courses,
     format_hours,
     format_next_goal,
     format_timer,
     format_today,
     handle,
+    next_timer_state,
     parse_command,
 )
 from studylife_telegram.studylife_client import StudyLifeApiError
+
+TZ = ZoneInfo("Europe/Berlin")
+NOW = datetime(2026, 9, 17, 12, 0, tzinfo=TZ)
+
+
+def at(hour: int, minute: int = 0) -> str:
+    """A StudyLife timestamp: local wall clock, no offset - exactly what the server sends."""
+    return NOW.replace(hour=hour, minute=minute).replace(tzinfo=None).isoformat()
 
 
 class TestParseCommand:
@@ -66,19 +79,61 @@ class TestFormatHours:
 class TestFormatters:
     def test_timer_states(self) -> None:
         assert format_timer({"isRunning": False}) == "No focus session is running."
-        assert format_timer({"isRunning": True, "isPaused": True}) == "A focus session is paused."
-        assert format_timer({"isRunning": True}) == "A focus session is running."
         assert format_timer({}) == "No focus session is running."
+        assert "running" in format_timer({"isRunning": True})
+
+    def test_a_kept_session_with_a_stopped_clock_is_a_pause(self) -> None:
+        # The only way the two are distinguishable: stop clears sessionId, pause keeps it.
+        # There is no isPaused field on TimerStateEntity for either of them to use.
+        assert "paused" in format_timer({"isRunning": False, "sessionId": 42})
+        assert "paused" not in format_timer({"isRunning": False, "sessionId": None})
+
+    def test_running_timer_reports_phase_mode_round_and_remaining(self) -> None:
+        text = format_timer(
+            {
+                "isRunning": True,
+                "isBreak": False,
+                "timerModeId": 2,
+                "currentRound": 3,
+                "phaseEndsAt": at(12, 26),
+            },
+            NOW,
+            TZ,
+        )
+        assert "Focus is running." in text
+        assert "26 min left." in text
+        assert "Flow State" in text
+        assert "Round 3" in text
+
+    def test_break_is_named_as_a_break(self) -> None:
+        assert "Break is running." in format_timer({"isRunning": True, "isBreak": True}, NOW, TZ)
 
     def test_today_survives_missing_sections(self) -> None:
-        assert "Today: -" in format_today({})
-        text = format_today({"hours": {"today": 1.5, "week": 7.0}, "streak": {"current": 1}})
+        assert "Today: -" not in format_today({}, [], NOW, TZ)
+        assert "Today: 0 min" in format_today({}, [], NOW, TZ)
+        text = format_today(
+            {"hours": {"week": 7.0}, "streak": {"current": 1}},
+            [{"startTime": at(9, 0), "endTime": at(10, 30)}],
+            NOW,
+            TZ,
+        )
         assert "Today: 1 h 30 min" in text
         assert "This week: 7 h 0 min" in text
         assert "Streak: 1 day" in text
 
     def test_today_pluralises_the_streak(self) -> None:
-        assert "Streak: 3 days" in format_today({"streak": {"current": 3}})
+        assert "Streak: 3 days" in format_today({"streak": {"current": 3}}, [], NOW, TZ)
+
+    def test_today_is_summed_from_sessions_not_read_off_the_metrics_response(self) -> None:
+        # MetricsHoursDto has no daily figure at all, so a "today" key there must be ignored -
+        # believing it is what made this render as a dash.
+        text = format_today(
+            {"hours": {"today": 99.0, "week": 7.0}},
+            [{"startTime": at(8, 0), "endTime": at(9, 15)}],
+            NOW,
+            TZ,
+        )
+        assert "Today: 1 h 15 min" in text
 
     def test_next_goal(self) -> None:
         assert format_next_goal({}) == "No upcoming course goals."
@@ -134,9 +189,12 @@ class FakeClient:
         self.timer: dict[str, Any] = overrides.get("timer", {"isRunning": False})
         self.courses: list[dict[str, Any]] = overrides.get("courses", [])
         self.metrics: dict[str, Any] = overrides.get("metrics", {})
+        self.history: list[dict[str, Any]] = overrides.get("history", [])
+        self.sessions: list[dict[str, Any]] = overrides.get("sessions", [])
         self.raises: Exception | None = overrides.get("raises")
         self.saved: dict[str, Any] | None = None
         self.notes: list[tuple[str, str]] = []
+        self.created: list[dict[str, Any]] = []
 
     async def get_timer_state(self) -> dict[str, Any]:
         if self.raises:
@@ -157,69 +215,220 @@ class FakeClient:
             raise self.raises
         return dict(self.metrics)
 
+    async def get_session_history(
+        self, days: int = 2, only_completed: bool = True
+    ) -> list[dict[str, Any]]:
+        if self.raises:
+            raise self.raises
+        return list(self.history)
+
+    async def list_sessions(self) -> list[dict[str, Any]]:
+        if self.raises:
+            raise self.raises
+        return list(self.sessions)
+
+    async def create_session(
+        self, course_id: int, start_time: Any, end_time: Any, topic: str | None = None
+    ) -> dict[str, Any]:
+        self.created.append(
+            {"courseId": course_id, "startTime": start_time, "endTime": end_time, "topic": topic}
+        )
+        return {"id": 99}
+
     async def create_note(self, title: str, content: str) -> dict[str, Any]:
         self.notes.append((title, content))
         return {"id": 1}
+
+
+CHAT = 4242
+
+
+async def run(
+    command: ParsedCommand,
+    client: FakeClient,
+    runs: RunTracker | None = None,
+    now: datetime = NOW,
+    chat_id: int = CHAT,
+) -> str:
+    return await handle(command, client, runs or RunTracker(), chat_id, now, TZ)
+
+
+class TestNextTimerState:
+    """The payload, which is where the silent failures live: the server drops unknown keys
+    without complaining, so a wrong field name costs a feature and never an error."""
+
+    def test_sends_only_fields_the_server_actually_has(self) -> None:
+        state = next_timer_state({"isRunning": False}, "focus", NOW)
+        assert set(state) == {
+            "sessionId",
+            "isRunning",
+            "isBreak",
+            "currentRound",
+            "timerModeId",
+            "phaseEndsAt",
+            "clientNow",
+        }
+
+    def test_pause_stops_the_clock_but_keeps_the_session(self) -> None:
+        state = next_timer_state(
+            {"isRunning": True, "sessionId": 42, "isBreak": True, "currentRound": 3}, "pause", NOW
+        )
+        assert state["isRunning"] is False
+        assert state["phaseEndsAt"] is None
+        assert state["sessionId"] == 42
+        assert state["currentRound"] == 3
+        assert state["isBreak"] is True
+
+    def test_stop_ends_the_session_and_resets_the_round(self) -> None:
+        state = next_timer_state(
+            {"isRunning": True, "sessionId": 42, "isBreak": True, "currentRound": 3}, "stop", NOW
+        )
+        assert state["sessionId"] is None
+        assert state["currentRound"] == 1
+        assert state["isBreak"] is False
+        assert state["phaseEndsAt"] is None
+
+    def test_start_sets_the_phase_end_from_the_mode(self) -> None:
+        state = next_timer_state({"isRunning": False, "timerModeId": 3}, "focus", NOW)
+        assert state["isRunning"] is True
+        # Ultradian Rhythm: 90 minutes of focus.
+        assert state["phaseEndsAt"] == "2026-09-17T13:30:00"
+
+    def test_an_unknown_custom_mode_falls_back_to_a_classic_phase(self) -> None:
+        # Custom modes (id >= 100) live in settings this bot cannot read; the mode is kept.
+        state = next_timer_state({"isRunning": False, "timerModeId": 137}, "focus", NOW)
+        assert state["timerModeId"] == 137
+        assert state["phaseEndsAt"] == "2026-09-17T12:25:00"
+
+
+class TestAgenda:
+    def test_lists_the_next_planned_sessions_in_order(self) -> None:
+        sessions = [
+            {"id": 2, "courseName": "Physik", "startTime": at(16, 0)},
+            {"id": 1, "courseName": "Mathe", "startTime": at(14, 0)},
+            {"id": 3, "courseName": "Already past", "startTime": at(9, 0)},
+            {"id": 4, "courseName": "Done", "startTime": at(18, 0), "isCompleted": True},
+        ]
+        assert format_agenda(sessions, NOW, TZ).splitlines() == [
+            "- 14:00 Mathe",
+            "- 16:00 Physik",
+        ]
+
+    def test_says_so_when_nothing_is_planned(self) -> None:
+        assert format_agenda([], NOW, TZ) == "Nothing planned."
 
 
 @pytest.mark.asyncio
 class TestHandle:
     async def test_status(self) -> None:
         client = FakeClient(timer={"isRunning": True})
-        assert await handle(ParsedCommand("status", ""), client) == "A focus session is running."
+        assert "running" in await run(ParsedCommand("status", ""), client)
 
-    async def test_focus_starts_and_clears_paused(self) -> None:
-        client = FakeClient(timer={"isRunning": False, "isPaused": True})
-        await handle(ParsedCommand("focus", ""), client)
-        assert client.saved == {"isRunning": True, "isPaused": False}
-
-    async def test_focus_with_a_course_sets_the_id(self) -> None:
-        client = FakeClient(courses=[{"id": 7, "name": "Mathe"}])
-        await handle(ParsedCommand("focus", "Mathe"), client)
+    async def test_focus_starts_the_clock(self) -> None:
+        client = FakeClient(timer={"isRunning": False, "sessionId": 42})
+        await run(ParsedCommand("focus", ""), client)
         assert client.saved is not None
-        assert client.saved["courseId"] == 7
+        assert client.saved["isRunning"] is True
+        assert client.saved["phaseEndsAt"] is not None
+
+    async def test_pause_is_not_a_stop(self) -> None:
+        # The bug this replaces: pause sent isPaused (which the server drops) together with
+        # isRunning false, which is simply a stop - the session was lost every time.
+        client = FakeClient(timer={"isRunning": True, "sessionId": 42, "currentRound": 2})
+        reply = await run(ParsedCommand("pause", ""), client)
+        assert client.saved is not None
+        assert client.saved["sessionId"] == 42
+        assert client.saved["isRunning"] is False
+        assert "paused" in reply
+
+    async def test_stop_clears_the_session(self) -> None:
+        client = FakeClient(timer={"isRunning": True, "sessionId": 42})
+        await run(ParsedCommand("stop", ""), client)
+        assert client.saved is not None
+        assert client.saved["sessionId"] is None
 
     async def test_focus_with_an_unknown_course_writes_nothing(self) -> None:
         client = FakeClient(courses=[{"id": 7, "name": "Mathe"}])
-        reply = await handle(ParsedCommand("focus", "Physik"), client)
+        reply = await run(ParsedCommand("focus", "Physik"), client)
         assert "No single course matches" in reply
         assert client.saved is None
 
-    async def test_stop_and_pause(self) -> None:
-        client = FakeClient(timer={"isRunning": True})
-        await handle(ParsedCommand("stop", ""), client)
-        assert client.saved == {"isRunning": False, "isPaused": False}
+    async def test_a_run_with_a_course_becomes_a_session_on_stop(self) -> None:
+        # The timer row has no course column, so this is the only way the picked course reaches
+        # the history at all.
+        client = FakeClient(courses=[{"id": 7, "name": "Mathe"}])
+        runs = RunTracker()
+        await run(ParsedCommand("focus", "Mathe"), client, runs)
+        reply = await run(ParsedCommand("stop", ""), client, runs, NOW + timedelta(minutes=25))
+        assert len(client.created) == 1
+        assert client.created[0]["courseId"] == 7
+        assert "Logged 25 min" in reply
 
-        client = FakeClient(timer={"isRunning": True})
-        await handle(ParsedCommand("pause", ""), client)
-        assert client.saved == {"isRunning": True, "isPaused": True}
+    async def test_runs_do_not_bleed_between_chats(self) -> None:
+        # One process now serves every connected account, so a run started in one chat must
+        # never be logged to another chat's account when that one stops.
+        client = FakeClient(courses=[{"id": 7, "name": "Mathe"}])
+        runs = RunTracker()
+        await run(ParsedCommand("focus", "Mathe"), client, runs, chat_id=111)
+        reply = await run(
+            ParsedCommand("stop", ""), client, runs, NOW + timedelta(minutes=25), chat_id=222
+        )
+        assert client.created == []
+        assert "Logged" not in reply
+        # The first chat's run is still there and still its own.
+        reply = await run(
+            ParsedCommand("stop", ""), client, runs, NOW + timedelta(minutes=25), chat_id=111
+        )
+        assert len(client.created) == 1
+        assert client.created[0]["courseId"] == 7
+
+    async def test_a_run_without_a_course_logs_nothing(self) -> None:
+        client = FakeClient()
+        runs = RunTracker()
+        await run(ParsedCommand("focus", ""), client, runs)
+        reply = await run(ParsedCommand("stop", ""), client, runs, NOW + timedelta(minutes=25))
+        assert client.created == []
+        assert "Logged" not in reply
+
+    async def test_a_run_too_short_to_log_says_so_instead_of_going_quiet(self) -> None:
+        client = FakeClient(courses=[{"id": 7, "name": "Mathe"}])
+        runs = RunTracker()
+        await run(ParsedCommand("focus", "Mathe"), client, runs)
+        reply = await run(ParsedCommand("stop", ""), client, runs, NOW + timedelta(seconds=4))
+        assert client.created == []
+        assert "Too short" in reply
 
     async def test_a_stale_client_sequence_is_never_sent_back(self) -> None:
         # Echoing the server's counter would make our own write look older than it is.
         client = FakeClient(timer={"isRunning": False, "clientSequence": 41})
-        await handle(ParsedCommand("focus", ""), client)
+        await run(ParsedCommand("focus", ""), client)
         assert client.saved is not None
         assert "clientSequence" not in client.saved
 
+    async def test_today_uses_the_session_history(self) -> None:
+        client = FakeClient(
+            metrics={"hours": {"week": 7.0}},
+            history=[{"startTime": at(10, 0), "endTime": at(11, 30)}],
+        )
+        assert "Today: 1 h 30 min" in await run(ParsedCommand("today", ""), client)
+
     async def test_note_requires_an_argument(self) -> None:
         client = FakeClient()
-        assert await handle(ParsedCommand("note", ""), client) == "Usage: /note <text>"
+        assert await run(ParsedCommand("note", ""), client) == "Usage: /note <text>"
         assert client.notes == []
 
     async def test_note_uses_the_first_line_as_the_title(self) -> None:
         client = FakeClient()
-        await handle(ParsedCommand("note", "Kapitel 3\nAlles über Seitenersetzung"), client)
+        await run(ParsedCommand("note", "Kapitel 3\nAlles zu Seitenersetzung"), client)
         assert client.notes[0][0] == "Kapitel 3"
 
     async def test_unknown_command_offers_help(self) -> None:
-        assert "Unknown command" in await handle(ParsedCommand("dance", ""), FakeClient())
+        assert "Unknown command" in await run(ParsedCommand("dance", ""), FakeClient())
 
     async def test_a_permission_error_says_what_to_do(self) -> None:
         client = FakeClient(raises=StudyLifeApiError(403, "forbidden"))
-        reply = await handle(ParsedCommand("status", ""), client)
-        assert "not granted" in reply
+        assert "not granted" in await run(ParsedCommand("status", ""), client)
 
     async def test_other_api_errors_do_not_escape(self) -> None:
         client = FakeClient(raises=StudyLifeApiError(502, "bad gateway"))
-        reply = await handle(ParsedCommand("today", ""), client)
-        assert "502" in reply
+        assert "502" in await run(ParsedCommand("today", ""), client)
