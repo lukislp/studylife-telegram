@@ -1,3 +1,10 @@
+## [1.2.3](https://github.com/lukislp/studylife-telegram/compare/v1.2.2...v1.2.3) (2026-09-17)
+
+
+### Bug Fixes
+
+* **docker:** bump astral-sh/uv from 0.12.13 to 0.12.15 ([#3](https://github.com/lukislp/studylife-telegram/issues/3)) ([832fea9](https://github.com/lukislp/studylife-telegram/commit/832fea945bd96896e10fe19bc0412739f4b0754f))
+
 ## [1.2.2](https://github.com/lukislp/studylife-telegram/compare/v1.2.1...v1.2.2) (2026-09-17)
 
 
