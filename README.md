@@ -96,36 +96,27 @@ Register once through [studylife-developers](https://github.com/lukislp/studylif
 | Field | Value |
 | --- | --- |
 | Client ID | `studylife-telegram` |
-| Redirect URIs | `https://<your PUBLIC_BASE_URL>/connect/callback`, plus `http://127.0.0.1:8785/callback`, `…8786…`, `…8787…`, `…8788…` |
+| Redirect URIs | `https://<your PUBLIC_BASE_URL>/connect/callback` |
 | Scopes | `TimerState.Get`, `TimerState.Save`, `Courses.GetAll`, `Metrics.GetSummary`, `Notes.Create`, `Sessions.GetAll`, `Sessions.GetHistory`, `Sessions.Create` |
 
 The three `Sessions` scopes are what make `/today`, `/agenda` and the reminders possible:
 the metrics API has no daily figure and no upcoming-session list, so both are derived from
 the session data. `Sessions.Create` writes the session a `/stop` produces.
 
-Four loopback URIs because `redirect_uri` is validated by **exact** match and the login binds
-whichever port is free. They differ from `studylife-cli`'s 8765–8768 and `studylife-vscode`'s
-8775–8778 so all three can be logged in simultaneously.
+One URI, and only one is needed: the bot always redirects to its own callback. `redirect_uri` is
+validated by **exact** match, so spell it exactly as `PUBLIC_BASE_URL` + `/connect/callback` -
+a trailing slash or a different host is refused, which is the point.
 
-The public callback is what makes `/login` work from a phone. The loopback URIs are only needed
-for `login.py`, the local helper kept for scripted setups. The server matches redirect URIs
-character for character, so spell the callback exactly as `PUBLIC_BASE_URL` + `/connect/callback`.
+Earlier versions also registered loopback URIs for a local `login.py` helper that produced one
+account-wide API key. Both are gone: keys are per chat now, and `/login` obtains them from
+inside Telegram.
 
-### 2. Get the API key
-
-```bash
-python -m studylife_telegram.login https://studylife.example.com
-```
-
-Opens your browser, you approve, and the key is printed. That value goes into
-`STUDYLIFE_API_KEY`. The bot never logs in itself — it runs headless and only carries the key.
-
-### 3. Create the bot
+### 2. Create the bot
 
 Talk to [@BotFather](https://t.me/BotFather), create a bot, keep the token. Get your own chat id
 from [@userinfobot](https://t.me/userinfobot).
 
-### 4. Configure
+### 3. Configure
 
 `*` `TELEGRAM_ALLOWED_CHAT_IDS` is required unless `TELEGRAM_ALLOW_ANY_CHAT` is `true`. The
 service refuses to start with neither, on purpose: an env var that silently goes missing must
@@ -164,7 +155,7 @@ Rotating it breaks no data, but every chat has to `/login` again.
 the server's local wall clock; this container would otherwise run UTC and every reminder
 would fire an hour or two off.
 
-### 5. Point Telegram at it
+### 4. Point Telegram at it
 
 Telegram only delivers to HTTPS with a valid certificate:
 

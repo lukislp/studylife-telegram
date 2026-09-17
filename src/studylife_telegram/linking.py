@@ -1,7 +1,8 @@
 """Connecting one Telegram chat to one StudyLife account.
 
-Same wire shape as login.py's one-off browser flow, with the loopback redirect replaced by this
-bot's own public callback - which is what makes it usable from a phone, with nothing installed.
+Same wire shape as studylife-cli's generic dynamic-client flow, with its RFC 8252 loopback
+redirect replaced by this bot's own public callback - which is what makes it usable from a phone,
+with nothing installed. It replaces a local helper that produced one account-wide key.
 StudyLife needs no change for it: ConsentRedirectPolicy routes dynamically registered clients
 past the hardcoded per-audience allow-list and matches them against their own registered
 AllowedRedirectUris instead, and any absolute https URL may be registered there.
