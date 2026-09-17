@@ -73,16 +73,22 @@ distort the grade and ECTS correlations StudyLife computes from session history.
 
 ## Security model
 
-This is a **single-account** bot, like `studylife-discord` and unlike `studylife-alexa`: it holds
-one StudyLife API key and acts only on that account. Two things protect it, and both matter:
+Each Telegram chat links to **its own** StudyLife account: `/login` runs StudyLife's generic
+dynamic-client consent flow (PKCE, callback on this bot's `PUBLIC_BASE_URL`) and stores the
+resulting per-chat API key encrypted at rest (`LINK_ENCRYPTION_KEY`, SQLite at `LINK_DB_PATH`).
+The bot never holds an account-wide key, and a chat can only ever reach the account it linked -
+the single-use `/login` state is what binds a callback to a chat. Three things protect it:
 
 1. **Telegram's webhook secret token.** Telegram does not sign its deliveries — the only proof a
    request came from Telegram is the secret the bot chose when calling `setWebhook`, echoed back
    in `X-Telegram-Bot-Api-Secret-Token`. That header is the entire door. Generate it with real
    entropy and treat it like a password.
-2. **A chat allowlist.** Telegram hands a bot's username to anyone who finds it. Without
-   `TELEGRAM_ALLOWED_CHAT_IDS`, any stranger who found the bot could drive your timer. The
-   service refuses to start if the list parses to empty.
+2. **A chat allowlist, or an explicit opt-out.** Telegram hands a bot's username to anyone who
+   finds it. `TELEGRAM_ALLOWED_CHAT_IDS` limits who may talk to the bot at all; the service
+   refuses to start if that list parses to empty. Set `TELEGRAM_ALLOW_ANY_CHAT=true` only when
+   you mean it: then anyone may `/login` and drive their own account (never somebody else's).
+3. **Instance pinning.** `/login` connects to `STUDYLIFE_BASE_URL` and the instances listed in
+   `STUDYLIFE_EXTRA_INSTANCES`, nothing else, unless `STUDYLIFE_ALLOW_ANY_INSTANCE` is set.
 
 StudyLife's own webhooks into this bot are authenticated separately, with HMAC-SHA256 over the
 raw request body — the same scheme `studylife-webhooks` uses for every other subscriber.
