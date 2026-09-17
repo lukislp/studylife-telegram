@@ -1,3 +1,10 @@
+# [1.2.0](https://github.com/lukislp/studylife-telegram/compare/v1.1.0...v1.2.0) (2026-09-17)
+
+
+### Features
+
+* connect a StudyLife account per chat ([#11](https://github.com/lukislp/studylife-telegram/issues/11)) ([5f6a660](https://github.com/lukislp/studylife-telegram/commit/5f6a66047ff489b9c818987242b0d0c57c5aa8f2))
+
 # [1.1.0](https://github.com/lukislp/studylife-telegram/compare/v1.0.1...v1.1.0) (2026-09-17)
 
 
