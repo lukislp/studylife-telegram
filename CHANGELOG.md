@@ -1,3 +1,10 @@
+## [1.2.5](https://github.com/lukislp/studylife-telegram/compare/v1.2.4...v1.2.5) (2026-09-20)
+
+
+### Bug Fixes
+
+* **ci:** correct missing Harden Runner allowlist ports (github.com:22, crl:80) ([#24](https://github.com/lukislp/studylife-telegram/issues/24)) ([bf90c64](https://github.com/lukislp/studylife-telegram/commit/bf90c64ea690791595e73a7a965b5cb38c61278a))
+
 ## [1.2.4](https://github.com/lukislp/studylife-telegram/compare/v1.2.3...v1.2.4) (2026-09-20)
 
 
