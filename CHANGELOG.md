@@ -1,3 +1,10 @@
+## [1.2.4](https://github.com/lukislp/studylife-telegram/compare/v1.2.3...v1.2.4) (2026-09-20)
+
+
+### Bug Fixes
+
+* **ci:** add Harden Runner in audit mode to every job ([#22](https://github.com/lukislp/studylife-telegram/issues/22)) ([89c5d17](https://github.com/lukislp/studylife-telegram/commit/89c5d17301b3d05453681f639bdf478813ac1dd2))
+
 ## [1.2.3](https://github.com/lukislp/studylife-telegram/compare/v1.2.2...v1.2.3) (2026-09-17)
 
 
