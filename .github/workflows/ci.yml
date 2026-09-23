@@ -54,7 +54,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
-          version: "0.5.8"
+          version: "0.12.18"
           cache-suffix: "lint"
       - run: uv python install 3.12
       - run: uv sync --frozen
@@ -99,7 +99,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
-          version: "0.5.8"
+          version: "0.12.18"
           cache-suffix: "test"
       - run: uv python install 3.12
       - run: uv sync --frozen
@@ -142,6 +142,7 @@ jobs:
             pypi.org:443
             raw.githubusercontent.com:443
             registry-1.docker.io:443
+            registry.npmjs.org:443
             rekor.sigstore.dev:443
             release-assets.githubusercontent.com:443
             releases.astral.sh:443
@@ -518,6 +519,7 @@ jobs:
             pypi.org:443
             raw.githubusercontent.com:443
             registry-1.docker.io:443
+            registry.npmjs.org:443
             rekor.sigstore.dev:443
             release-assets.githubusercontent.com:443
             releases.astral.sh:443
