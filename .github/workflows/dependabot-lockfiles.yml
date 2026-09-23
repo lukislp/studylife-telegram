@@ -15,7 +15,7 @@ jobs:
   lockfiles:
     uses: lukislp/ci-workflows/.github/workflows/dependabot-lockfiles.yml@fc8927e0816d7d52eacce5a8ff758f17bf438ec5 # v1.7.4
     with:
-      uv-version: "0.5.8"
+      uv-version: "0.12.18"
     secrets:
       AUTOMERGE_TOKEN: ${{ secrets.AUTOMERGE_TOKEN }}
       DEPLOY_SIGNING_KEY: ${{ secrets.DEPLOY_SIGNING_KEY }}
