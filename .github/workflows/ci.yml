@@ -369,16 +369,17 @@ jobs:
         with:
           egress-policy: block
           allowed-endpoints: >
-            *.githubapp.com:443
-            *.blob.core.windows.net:443
             api.github.com:443
             auth.docker.io:443
+            *.blob.core.windows.net:443
             check.trivy.dev:443
             files.pythonhosted.org:443
             fulcio.sigstore.dev:443
+            get.trivy.dev:443
             ghcr.io:443
             github.com:22
             github.com:443
+            *.githubapp.com:443
             mirror.gcr.io:443
             pkg-containers.githubusercontent.com:443
             production.cloudfront.docker.com:443
