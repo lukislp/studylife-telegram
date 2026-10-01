@@ -481,7 +481,7 @@ jobs:
           fi
           git diff --stat
       - name: Sign and push the image tag bump
-        uses: lukislp/ci-workflows/.github/actions/signed-bot-commit@962d016c5e3ee498913a8492898dd5e238ccbfb1 # v1.7.9
+        uses: lukislp/ci-workflows/.github/actions/signed-bot-commit@0d352a3fab2ba9099b957c4164be2411f13786e8 # v1.7.12
         with:
           signing-key: ${{ secrets.DEPLOY_SIGNING_KEY }}
           committer-name: "studylife-telegram-deploy"
