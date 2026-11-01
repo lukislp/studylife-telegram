@@ -9,7 +9,13 @@ updates:
       prefix: "fix(ci)"
     reviewers:
       - "lukislp"
-    open-pull-requests-limit: 2
+    open-pull-requests-limit: 5
+    # All lukislp/ci-workflows bumps share one PR, so they take one slot of the
+    # limit and other actions (e.g. harden-runner) are not starved by them.
+    groups:
+      ci-workflows:
+        patterns:
+          - "lukislp/ci-workflows*"
   - package-ecosystem: uv
     directory: /
     schedule:
@@ -18,7 +24,7 @@ updates:
       prefix: "fix(deps)"
     reviewers:
       - "lukislp"
-    open-pull-requests-limit: 2
+    open-pull-requests-limit: 5
   - package-ecosystem: docker
     directory: /
     schedule:
@@ -32,4 +38,4 @@ updates:
         update-types: ["version-update:semver-minor", "version-update:semver-major"]
     reviewers:
       - "lukislp"
-    open-pull-requests-limit: 2
+    open-pull-requests-limit: 5
