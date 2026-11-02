@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   lockfiles:
-    uses: lukislp/ci-workflows/.github/workflows/dependabot-lockfiles.yml@8d601225359f47a17757024a06fcdf227ed2a59a # v1.8.19
+    uses: lukislp/ci-workflows/.github/workflows/dependabot-lockfiles.yml@1e08eeda9f5ded5011c26e0f49d4c71a7927a375 # v1.8.22
     with:
       uv-version: "0.12.18"
     secrets:
