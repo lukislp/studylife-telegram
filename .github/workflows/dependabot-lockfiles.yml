@@ -1,21 +1,26 @@
 name: Dependabot lock files
 
-# Thin caller of the shared implementation in lukislp/ci-workflows: regenerates the lock files
-# on Dependabot's own PRs with the CI tool versions and pushes them back onto the PR branch.
-# Plain pull_request on purpose (never pull_request_target); AUTOMERGE_TOKEN is stored as a
-# Dependabot secret, which only Dependabot-triggered runs can read.
+# Thin caller of the lockfiles workflow of lukislp/lktec-bot (a GitHub App): on a Dependabot pull
+# request the lock files are regenerated with the CI tool versions and committed back onto the
+# pull request branch by the App (GitHub signs that commit itself). The triggers stay here
+# because a reusable workflow cannot declare them for the caller. See docs/modules/lockfiles.md
+# in lukislp/lktec-bot; the policy lives in .github/lktec-bot.yml on the default branch.
+#
+# pull_request_target on purpose: the App id and key are ordinary Actions secrets. The pull
+# request's code only ever runs in the job without a secret.
 on:
-  pull_request:
+  pull_request_target:
     types: [opened, synchronize, reopened]
 
 permissions:
   contents: read
+  actions: read # the reusable workflow reads which commit of itself the run uses
 
 jobs:
   lockfiles:
-    uses: lukislp/ci-workflows/.github/workflows/dependabot-lockfiles.yml@ea532e9b173cf0e512c9d54c18886eebd0b0d1ab # v1.8.24
+    uses: lukislp/lktec-bot/.github/workflows/lockfiles.yml@ba6a835404962f464956ae8d4d05309e97b882c2 # v0.1.2
     with:
       uv-version: "0.12.18"
     secrets:
-      AUTOMERGE_TOKEN: ${{ secrets.AUTOMERGE_TOKEN }}
-      DEPLOY_SIGNING_KEY: ${{ secrets.DEPLOY_SIGNING_KEY }}
+      app-id: ${{ secrets.LKTEC_BOT_APP_ID }}
+      private-key: ${{ secrets.LKTEC_BOT_PRIVATE_KEY }}
