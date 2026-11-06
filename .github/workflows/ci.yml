@@ -117,7 +117,7 @@ jobs:
   get-version:
     needs: [lint, test]
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
-    uses: lukislp/lktec-bot/.github/workflows/release.yml@38079b17498fcfda986f427fd6258bd32185e7c3 # v0.2.0
+    uses: lukislp/lktec-bot/.github/workflows/release.yml@f1dbc56e0810b5f78691019889fc76cf5423d7fa # v0.3.0
     with:
       dry-run: true
     secrets:
@@ -373,7 +373,7 @@ jobs:
     concurrency:
       group: studylife-telegram-release-chain
       cancel-in-progress: false
-    uses: lukislp/lktec-bot/.github/workflows/deploy-bump.yml@38079b17498fcfda986f427fd6258bd32185e7c3 # v0.2.0
+    uses: lukislp/lktec-bot/.github/workflows/deploy-bump.yml@f1dbc56e0810b5f78691019889fc76cf5423d7fa # v0.3.0
     with:
       version: ${{ needs.release.outputs.version }}
       images: 'ghcr\.io/lukislp/(studylife-telegram)'
@@ -386,7 +386,7 @@ jobs:
   release:
     needs: [get-version]
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && needs.get-version.outputs.released == 'true'
-    uses: lukislp/lktec-bot/.github/workflows/release.yml@38079b17498fcfda986f427fd6258bd32185e7c3 # v0.2.0
+    uses: lukislp/lktec-bot/.github/workflows/release.yml@f1dbc56e0810b5f78691019889fc76cf5423d7fa # v0.3.0
     secrets:
       app-id: ${{ secrets.LKTEC_BOT_APP_ID }}
       private-key: ${{ secrets.LKTEC_BOT_PRIVATE_KEY }}
