@@ -364,80 +364,24 @@ jobs:
           ignore-unfixed: true
           exit-code: "1"
 
+  # The image tag bump of the deploy manifests, committed onto the default branch by the lktec-bot App
+  # (module sync: docs/modules/sync.md in lukislp/lktec-bot; the App is a bypass actor of the branch ruleset
+  # for this one commit, which GitHub signs itself). Flux picks the new tag up from the branch.
   deploy-bump:
     needs: [get-version, release, docker-manifest-merge, trivy]
     if: github.event_name == 'push' && needs.release.outputs.released == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
     concurrency:
       group: studylife-telegram-release-chain
       cancel-in-progress: false
-    permissions:
-      contents: read
-    env:
-      NEXT_VERSION: ${{ needs.release.outputs.version }}
-    steps:
-      - name: Harden Runner
-        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
-        with:
-          egress-policy: block
-          allowed-endpoints: >
-            *.githubapp.com:443
-            *.blob.core.windows.net:443
-            api.github.com:443
-            auth.docker.io:443
-            check.trivy.dev:443
-            files.pythonhosted.org:443
-            fulcio.sigstore.dev:443
-            ghcr.io:443
-            github.com:22
-            github.com:443
-            mirror.gcr.io:443
-            pkg-containers.githubusercontent.com:443
-            production.cloudfront.docker.com:443
-            docker-images-prod.s3.dualstack.us-east-1.amazonaws.com:443
-            pypi.org:443
-            raw.githubusercontent.com:443
-            registry-1.docker.io:443
-            rekor.sigstore.dev:443
-            release-assets.githubusercontent.com:443
-            releases.astral.sh:443
-            results-receiver.actions.githubusercontent.com:443
-            run-actions-*.actions.githubusercontent.com:443
-            timestamp.sigstore.dev:443
-            tuf-repo-cdn.sigstore.dev:443
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: main
-          fetch-depth: 0
-      # The default branch only takes direct pushes from this deploy key, so this job cannot
-      # fall back to GITHUB_TOKEN.
-      - name: Push as the deploy key
-        uses: lukislp/ci-workflows/.github/actions/deploy-key-push@ea532e9b173cf0e512c9d54c18886eebd0b0d1ab # v1.8.24
-        with:
-          deploy-key: ${{ secrets.SEMANTIC_RELEASE_DEPLOY_KEY }}
-          required: "true"
-      - name: Point the manifests at the released image and push
-        # k8s/flux/ is excluded on purpose: it holds Flux's own resources, which never carry an
-        # image reference. Matches studylife-webhooks' and studylife-alexa's job exactly.
-        run: |
-          set -eu
-          for f in $(grep -rlE 'ghcr\.io/lukislp/(studylife-telegram):' k8s --include='*.yaml' | grep -v '/flux/'); do
-            sed -i -E "s#(ghcr\.io/lukislp/(studylife-telegram)):[0-9A-Za-z._-]+#\1:${NEXT_VERSION}#g" "$f"
-          done
-          if git diff --quiet; then
-            echo "manifests already reference ${NEXT_VERSION}"
-            exit 0
-          fi
-          git diff --stat
-      - name: Sign and push the image tag bump
-        uses: lukislp/ci-workflows/.github/actions/signed-bot-commit@ea532e9b173cf0e512c9d54c18886eebd0b0d1ab # v1.8.24
-        with:
-          signing-key: ${{ secrets.DEPLOY_SIGNING_KEY }}
-          committer-name: "studylife-telegram-deploy"
-          committer-email: "155678024+lukislp@users.noreply.github.com"
-          commit-message: "chore(deploy): image ${{ env.NEXT_VERSION }} [skip ci]"
-          branch: main
+    uses: lukislp/lktec-bot/.github/workflows/deploy-bump.yml@38079b17498fcfda986f427fd6258bd32185e7c3 # v0.2.0
+    with:
+      version: ${{ needs.release.outputs.version }}
+      images: 'ghcr\.io/lukislp/(studylife-telegram)'
+      paths: k8s
+      branch: main
+    secrets:
+      app-id: ${{ secrets.LKTEC_BOT_APP_ID }}
+      private-key: ${{ secrets.LKTEC_BOT_PRIVATE_KEY }}
 
   release:
     needs: [get-version]

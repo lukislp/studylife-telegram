@@ -33,3 +33,11 @@ modules:
     paths: []
     # One line; {number} is the pull request number.
     commit-message: "chore(deps): refresh lockfiles after Dependabot bump"
+
+  # Commits the image tag bump of the deploy manifests onto the default branch after a release (see
+  # docs/modules/sync.md in lukislp/lktec-bot). The App is a bypass actor of the branch ruleset for it.
+  sync:
+    enabled: true
+    paths: [k8s]
+    branch: main
+    commit-message: "chore(deploy): image {version} [skip ci]"
