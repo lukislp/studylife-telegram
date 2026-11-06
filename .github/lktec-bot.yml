@@ -22,3 +22,14 @@ modules:
     branch: main
     first-version: "1.0.0"  # only used while no tag matches tag-format
     rules: []               # no custom rules, the defaults apply
+
+  # Commits the lock files that the lockfiles workflow regenerated for a Dependabot pull request
+  # (see docs/modules/lockfiles.md in lukislp/lktec-bot).
+  lockfiles:
+    enabled: true
+    # Default (empty): every supported ecosystem. Supported: uv (uv.lock), dotnet (packages.lock.json).
+    ecosystems: []
+    # Default (empty): the whole repository.
+    paths: []
+    # One line; {number} is the pull request number.
+    commit-message: "chore(deps): refresh lockfiles after Dependabot bump"
