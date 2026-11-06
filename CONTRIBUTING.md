@@ -13,13 +13,13 @@ small - but it is the same for every change, including the maintainer's own.
    ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)'s `lint` and `test` jobs, plus
    `dependency-review.yml`'s `review / dependency-review`) and the branch is up to date with
    `main`. Nobody pushes to `main` directly, not even the maintainer - the release chain itself
-   (semantic-release, the Docker build, the `k8s/` image-tag bump) runs as a push-triggered job on
+   (the lktec-bot release module, the Docker build, the `k8s/` image-tag bump) runs as a push-triggered job on
    `main` afterwards, not as part of the PR.
 
 ## What a pull request needs
 
-- **Conventional Commits.** The version and `CHANGELOG.md` are generated from the commit messages
-  by semantic-release (`fix:` = patch release, `feat:` = minor release; `build:`/`ci:`/`docs:`/
+- **Conventional Commits.** The version and the GitHub release notes are generated from the commit messages
+  by the lktec-bot release module (rules in `.github/lktec-bot.yml`; `fix:` = patch release, `feat:` = minor release; `build:`/`ci:`/`docs:`/
   `test:`/`chore:` produce no release). If the PR is squash-merged, the squashed commit message -
   usually the PR title - is what gets analyzed, so give the PR a Conventional Commit title too.
 - **Tests for new functionality.** New behaviour and bug fixes come with tests under `tests/`

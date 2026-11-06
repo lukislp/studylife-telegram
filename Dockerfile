@@ -30,7 +30,7 @@ RUN uv sync --frozen --no-dev --no-install-project
 # hatch-vcs derives the package version from git tags, but this image never COPYs .git
 # (deliberately, to keep the dependency layer above cacheable across releases) - so
 # building the project itself below has no VCS history to read. CI passes the exact
-# semantic-release version it already computed as a build-arg (see the docker job in
+# release version it already computed as a build-arg (see the docker job in
 # ci.yml). Un-suffixed SETUPTOOLS_SCM_PRETEND_VERSION, not the dist-specific
 # _FOR_STUDYLIFE_TELEGRAM variant - hatch-vcs's own get_version() call never sets
 # dist_name, so the dist-specific form is silently never read (same finding as
