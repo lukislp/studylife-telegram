@@ -130,7 +130,11 @@ def format_hours(hours: object) -> str:
     rather than raising - a missing field should not turn a status reply into an error."""
     if not isinstance(hours, int | float) or isinstance(hours, bool):
         return "-"
-    total_minutes = int(round(float(hours) * 60))
+    try:
+        total_minutes = int(round(float(hours) * 60))
+    except (OverflowError, ValueError):
+        # json.loads accepts NaN, Infinity, 1e999 and arbitrarily large integers.
+        return "-"
     if total_minutes < 0:
         total_minutes = 0
     h, m = divmod(total_minutes, 60)
