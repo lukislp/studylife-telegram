@@ -31,6 +31,15 @@ _ANNOUNCED_EVENTS = frozenset(
 )
 
 
+def _equal(expected: str, received: str) -> bool:
+    """Constant-time equality on bytes: hmac.compare_digest() raises TypeError for a str with
+    non-ASCII characters, and header values are latin-1 decoded, so a probe can send them (a
+    500 instead of a 401)."""
+    return hmac.compare_digest(
+        expected.encode("utf-8", "surrogatepass"), received.encode("utf-8", "surrogatepass")
+    )
+
+
 def verify_telegram_secret(expected: str, received: str | None) -> bool:
     """Constant-time comparison of the setWebhook secret token.
 
@@ -39,7 +48,7 @@ def verify_telegram_secret(expected: str, received: str | None) -> bool:
     """
     if not received or not expected:
         return False
-    return hmac.compare_digest(expected, received)
+    return _equal(expected, received)
 
 
 def verify_studylife_signature(secret: str, signature_hex: str | None, body: bytes) -> bool:
@@ -51,7 +60,7 @@ def verify_studylife_signature(secret: str, signature_hex: str | None, body: byt
     if not signature_hex or not secret:
         return False
     expected = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
-    return hmac.compare_digest(expected, signature_hex)
+    return _equal(expected, signature_hex)
 
 
 def is_allowed_chat(allowed: frozenset[int], chat_id: int | None) -> bool:

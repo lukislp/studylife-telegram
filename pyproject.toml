@@ -24,6 +24,10 @@ dev = [
     "ruff>=0.8",
     "mypy>=1.13",
 ]
+# Fuzzing harness (fuzz/), Linux only - the atheris wheel does not exist for Windows.
+fuzz = [
+    "atheris==3.0.0",
+]
 
 [build-system]
 requires = ["hatchling"]
