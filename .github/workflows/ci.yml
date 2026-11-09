@@ -146,8 +146,9 @@ jobs:
         with:
           version: "0.12.18"
           cache-suffix: "fuzz"
-      - run: uv sync --frozen --group fuzz
-      - run: uv run python fuzz/fuzz_inputs.py -max_total_time=30 -rss_limit_mb=1024
+      # atheris has no wheel for the project's default Python 3.14, so the job pins 3.12.
+      - run: uv sync --frozen --group fuzz --python 3.12
+      - run: uv run --python 3.12 python fuzz/fuzz_inputs.py -max_total_time=30 -rss_limit_mb=1024
 
   # ---------------------------------------------------------------------
   # Version / image / release - push to main only, mirrors studylife-alexa's/
