@@ -63,6 +63,10 @@ class TestFormatHours:
     def test_renders_hours_and_minutes(self) -> None:
         assert format_hours(2.25) == "2 h 15 min"
         assert format_hours(0.75) == "45 min"
+        assert format_hours(float("inf")) == "-"
+        assert format_hours(float("nan")) == "-"
+        assert format_hours(1e308) == "-"
+        assert format_hours(10**400) == "-"
         assert format_hours(0) == "0 min"
         assert format_hours(2) == "2 h 0 min"
 

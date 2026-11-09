@@ -112,3 +112,12 @@ class TestAnnouncementFilter:
         assert wants_announcement("note.created") is False
         assert wants_announcement(None) is False
         assert wants_announcement(42) is False
+
+
+class TestNonAsciiHeaders:
+    def test_non_ascii_header_values_are_rejected_not_raised(self) -> None:
+        assert verify_telegram_secret("s3cret-token", "caf\u00e9") is False
+        assert verify_studylife_signature("secret", "caf\u00e9", b"{}") is False
+
+    def test_non_ascii_secret_still_matches_itself(self) -> None:
+        assert verify_telegram_secret("t\u00f6ken", "t\u00f6ken") is True
