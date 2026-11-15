@@ -37,7 +37,7 @@ small - but it is the same for every change, including the maintainer's own.
   rejection path still rejects, not just the happy path.
 - **Ambiguous input stays ambiguous.** A course name or command argument that could match more
   than one course is rejected rather than guessed - the wrong course silently attributed would
-  skew the grade/ECTS correlations StudyLife computes from session history. Keep that behaviour
+  skew the grade/ECTS correlations StudyAtrium computes from session history. Keep that behaviour
   when touching `commands.py`.
 
 ## Running things locally

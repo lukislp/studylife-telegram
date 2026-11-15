@@ -203,14 +203,14 @@ async def _run_command(app: FastAPI, command: Any, chat_id: int) -> str:
     if command.name == "logout":
         app.state.runs.forget(chat_id)
         return (
-            "Disconnected. The API key stays valid on StudyLife until you revoke it there."
+            "Disconnected. The API key stays valid on StudyAtrium until you revoke it there."
             if await store.unlink(chat_id)
             else "This chat is not connected."
         )
     if command.name == "whoami":
         account = await store.get(chat_id)
         if account is None:
-            return "Not connected. Send /login to connect your StudyLife account."
+            return "Not connected. Send /login to connect your StudyAtrium account."
         who = f" as user {account.studylife_user_id}" if account.studylife_user_id else ""
         return f"Connected to {account.instance_url}{who}."
 
@@ -220,7 +220,7 @@ async def _run_command(app: FastAPI, command: Any, chat_id: int) -> str:
 
     account = await store.get(chat_id)
     if account is None:
-        return "Not connected. Send /login to connect your StudyLife account."
+        return "Not connected. Send /login to connect your StudyAtrium account."
     async with _client(account) as client:
         return await handle(
             command,
@@ -309,7 +309,7 @@ def _page(title: str, body: str) -> HTMLResponse:
     adding a dynamic one later cannot quietly turn this public route into an injection point."""
     return HTMLResponse(
         "<!doctype html><meta charset=utf-8>"
-        f"<title>StudyLife</title><body style='font-family:system-ui;padding:3rem;"
+        f"<title>StudyAtrium</title><body style='font-family:system-ui;padding:3rem;"
         f"text-align:center'><h1>{escape(title)}</h1><p>{escape(body)}</p>"
     )
 

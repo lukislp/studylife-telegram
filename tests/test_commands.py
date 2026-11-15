@@ -25,7 +25,7 @@ NOW = datetime(2026, 9, 17, 12, 0, tzinfo=TZ)
 
 
 def at(hour: int, minute: int = 0) -> str:
-    """A StudyLife timestamp: local wall clock, no offset - exactly what the server sends."""
+    """A StudyAtrium timestamp: local wall clock, no offset - exactly what the server sends."""
     return NOW.replace(hour=hour, minute=minute).replace(tzinfo=None).isoformat()
 
 

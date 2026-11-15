@@ -80,7 +80,7 @@ class TestAnnouncementFilter:
             assert wants_announcement(event) is True
 
     def test_every_announced_event_exists_in_the_servers_catalogue(self) -> None:
-        # "goal.due" used to be in this set and is not a StudyLife event at all
+        # "goal.due" used to be in this set and is not a StudyAtrium event at all
         # (WebhookEventTypes.cs), so that branch could never run and nothing said so. This list
         # is transcribed from that file; a name not on it is a name that will never arrive.
         catalogue = {
