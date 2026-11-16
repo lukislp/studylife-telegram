@@ -1,7 +1,8 @@
 """FastAPI app: three inbound routes, plus a health probe.
 
   POST /telegram           - updates from Telegram (secret token + chat allowlist)
-  GET  /connect/callback   - where StudyLife returns from a /login approval
+  GET  /connect/callback   - where StudyLife returns from a /login approval (shows a code that
+                             must then be typed into the chat - see confirmation.py)
   POST /webhooks/studylife - StudyLife's outgoing webhooks (HMAC-SHA256 over the raw body)
 
 The Telegram and StudyLife routes answer 200 for anything they choose not to act on. Telegram
@@ -27,8 +28,17 @@ from typing import Any
 from fastapi import FastAPI, Header, Request, Response
 from fastapi.responses import HTMLResponse
 
-from .commands import ACCOUNT_FREE_COMMANDS, RunTracker, format_help, handle, parse_command
+from .commands import (
+    ACCOUNT_FREE_COMMANDS,
+    ParsedCommand,
+    RunTracker,
+    format_help,
+    handle,
+    parse_command,
+)
 from .config import Settings
+from .confirmation import Verdict, format_code, looks_like_code
+from .link_service import begin_confirmation, confirm
 from .linking import (
     LinkError,
     build_connect_url,
@@ -185,7 +195,16 @@ async def telegram_update(
         await _send(request.app.state.telegram, chat_id, "This bot only works in a direct chat.")
         return Response(status_code=200)
 
-    command = parse_command(message.get("text"))
+    text = message.get("text")
+    command = parse_command(text)
+    # Pasting just the digits is accepted too; it only does anything when this chat has a
+    # confirmation waiting, and is otherwise treated like any other chatter (ignored).
+    if (
+        command is None
+        and looks_like_code(text)
+        and await request.app.state.store.get_confirmation(chat_id) is not None
+    ):
+        command = ParsedCommand("confirm", str(text))
     if command is None:
         return Response(status_code=200)
 
@@ -200,8 +219,11 @@ async def _run_command(app: FastAPI, command: Any, chat_id: int) -> str:
 
     if command.name == "login":
         return await _start_login(store, settings, chat_id, command.argument)
+    if command.name == "confirm":
+        return await _confirm_login(store, chat_id, command.argument)
     if command.name == "logout":
         app.state.runs.forget(chat_id)
+        await store.discard_confirmation(chat_id)
         return (
             "Disconnected. The API key stays valid on StudyAtrium until you revoke it there."
             if await store.unlink(chat_id)
@@ -230,6 +252,19 @@ async def _run_command(app: FastAPI, command: Any, chat_id: int) -> str:
             datetime.now(app.state.tz),
             app.state.tz,
         )
+
+
+async def _confirm_login(store: LinkStore, chat_id: int, supplied: str) -> str:
+    result = await confirm(store, chat_id, supplied)
+    if result.verdict is None:
+        return "Nothing is waiting for a code in this chat. Send /login to connect your account."
+    if result.verdict is Verdict.CONFIRMED:
+        return f"Connected to {result.instance_url}. Try /status or /today."
+    if result.verdict is Verdict.WRONG:
+        return f"That code does not match. {result.attempts_left} attempts left."
+    if result.verdict is Verdict.EXPIRED:
+        return "That code has expired. Send /login and try again."
+    return "Too many wrong codes. Nothing was connected - send /login to start over."
 
 
 async def _start_login(store: LinkStore, settings: Settings, chat_id: int, argument: str) -> str:
@@ -262,7 +297,8 @@ async def _start_login(store: LinkStore, settings: Settings, chat_id: int, argum
         "Open this in your browser to approve the connection.\n\n"
         "Long-press the link and open it in Safari or Chrome - Telegram's built-in browser "
         "cannot use passkeys, and the sign-in will just fail there without saying why.\n\n"
-        "The link works once and expires in 10 minutes. Do not forward it.\n\n" + url
+        "The link works once and expires in 10 minutes. Do not forward it.\n\n"
+        "After you approve, the page shows a code - type it back here to finish.\n\n" + url
     )
 
 
@@ -295,13 +331,22 @@ async def connect_callback(request: Request, state: str = "", assertion: str = "
         await _send(request.app.state.telegram, pending.chat_id, str(exc))
         return _page("Could not connect", "Your chat has the details.")
 
-    await store.link(pending.chat_id, api_key, pending.instance_url, user_id)
+    # NOT linked yet. The link is forwardable, so whoever approved here is not necessarily who
+    # started /login in the chat. The code goes only to this browser page; typing it into the
+    # chat that started the flow is what proves the same person is on both ends.
+    code = await begin_confirmation(store, pending, api_key, user_id)
     await _send(
         request.app.state.telegram,
         pending.chat_id,
-        f"Connected to {pending.instance_url}. Try /status or /today.",
+        "Approval received. To finish, type the code shown in your browser into this chat "
+        "(for example: /confirm 1234 5678). It expires in 10 minutes.",
     )
-    return _page("Connected", "You can close this tab - the bot has replied in your chat.")
+    return _page(
+        "Almost done",
+        f"Your code is {format_code(code)}. Type it into your chat with the bot to finish "
+        "connecting. If you did not start this connection yourself, or someone sent you this "
+        "link, do NOT enter the code anywhere - just close this tab.",
+    )
 
 
 def _page(title: str, body: str) -> HTMLResponse:
@@ -310,7 +355,8 @@ def _page(title: str, body: str) -> HTMLResponse:
     return HTMLResponse(
         "<!doctype html><meta charset=utf-8>"
         f"<title>StudyAtrium</title><body style='font-family:system-ui;padding:3rem;"
-        f"text-align:center'><h1>{escape(title)}</h1><p>{escape(body)}</p>"
+        f"text-align:center'><h1>{escape(title)}</h1><p>{escape(body)}</p>",
+        headers={"Cache-Control": "no-store"},  # the page can carry a live confirmation code
     )
 
 

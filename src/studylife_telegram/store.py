@@ -39,6 +39,15 @@ CREATE TABLE IF NOT EXISTS pending_links (
     instance_url TEXT NOT NULL,
     created_at REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS pending_confirmations (
+    chat_id INTEGER PRIMARY KEY,
+    code TEXT NOT NULL,
+    encrypted_api_key BLOB NOT NULL,
+    instance_url TEXT NOT NULL,
+    studylife_user_id TEXT,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    created_at REAL NOT NULL
+);
 """
 
 # How long a /login has to be completed in. The state is the only thing binding a public callback
@@ -61,6 +70,19 @@ class PendingLink:
     chat_id: int
     code_verifier: str
     instance_url: str
+
+
+@dataclass(frozen=True)
+class PendingConfirmation:
+    """An approved login waiting for its code to be typed into the chat. Not linked yet."""
+
+    chat_id: int
+    code: str
+    api_key: str
+    instance_url: str
+    studylife_user_id: str | None
+    attempts: int
+    created_at: float
 
 
 class LinkStore:
@@ -122,6 +144,61 @@ class LinkStore:
         if row is None or row[3] < now - PENDING_TTL_SECONDS:
             return None
         return PendingLink(state=state, chat_id=row[0], code_verifier=row[1], instance_url=row[2])
+
+    # --- the confirmation step (confirmation.py decides, this persists) -------------------
+
+    async def put_confirmation(
+        self,
+        chat_id: int,
+        code: str,
+        api_key: str,
+        instance_url: str,
+        user_id: str | None,
+        now: float | None = None,
+    ) -> None:
+        """One per chat: a newer approval replaces an older one, so only the latest code works.
+        The API key is encrypted here too - it is a live credential while it waits."""
+        await self._conn.execute(
+            "INSERT OR REPLACE INTO pending_confirmations "
+            "(chat_id, code, encrypted_api_key, instance_url, studylife_user_id, attempts, "
+            "created_at) VALUES (?, ?, ?, ?, ?, 0, ?)",
+            (
+                chat_id,
+                code,
+                self._fernet.encrypt(api_key.encode("utf-8")),
+                instance_url,
+                user_id,
+                time.time() if now is None else now,
+            ),
+        )
+        await self._conn.commit()
+
+    async def get_confirmation(self, chat_id: int) -> PendingConfirmation | None:
+        async with self._conn.execute(
+            "SELECT code, encrypted_api_key, instance_url, studylife_user_id, attempts, "
+            "created_at FROM pending_confirmations WHERE chat_id = ?",
+            (chat_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+        if row is None:
+            return None
+        try:
+            api_key = self._fernet.decrypt(row[1]).decode("utf-8")
+        except InvalidToken:
+            await self.discard_confirmation(chat_id)
+            return None
+        return PendingConfirmation(chat_id, row[0], api_key, row[2], row[3], row[4], row[5])
+
+    async def record_wrong_attempt(self, chat_id: int) -> None:
+        await self._conn.execute(
+            "UPDATE pending_confirmations SET attempts = attempts + 1 WHERE chat_id = ?",
+            (chat_id,),
+        )
+        await self._conn.commit()
+
+    async def discard_confirmation(self, chat_id: int) -> None:
+        await self._conn.execute("DELETE FROM pending_confirmations WHERE chat_id = ?", (chat_id,))
+        await self._conn.commit()
 
     # --- the link itself ------------------------------------------------------------------
 

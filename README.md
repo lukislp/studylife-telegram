@@ -38,8 +38,9 @@ the timer row has no course column, so there would be nothing to attribute the t
 ### Accounts
 
 Every chat drives its OWN StudyAtrium account. `/login` replies with a consent link; approving it
-in the browser sends you back to this bot, which stores the resulting API key for your chat. No
-file to edit, nothing to install.
+in the browser sends you back to this bot, whose page then shows an 8-digit code. Type it into the
+chat (`/confirm 1234 5678`, or just paste the digits) and only then is the account connected.
+No file to edit, nothing to install.
 
 Unlike an Alexa skill, which gets an access token on every request and can stay stateless, a
 Telegram update carries only a chat id - so the mapping is kept here, in a SQLite file on a small
@@ -51,6 +52,12 @@ Two things are deliberate:
   so an account linked there would be drivable by all of them.
 - **A leaked login link is not enough to take over a chat.** The PKCE verifier never leaves the
   bot, the state is single-use and expires in ten minutes, and the exchange needs both.
+- **A forwarded login link cannot attach someone else's account to your chat.** Approving the
+  link does not connect anything by itself: the confirmation code appears only in the browser
+  that approved, and must be typed into the chat that started `/login`. Someone who is sent a
+  forwarded link sees the code on their own screen, where it is useless to the sender. The code
+  is random (CSPRNG), single-use, expires after ten minutes, is compared in constant time, and
+  five wrong tries discard the pending link (`confirmation.py`, `link_service.py`).
 
 ### Reminders
 
