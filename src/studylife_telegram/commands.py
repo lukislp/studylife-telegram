@@ -78,7 +78,7 @@ COMMANDS: list[tuple[str, str]] = [
     ("agenda", "Your next planned study sessions"),
     ("courses", "List your courses"),
     ("note", "Save a quick note"),
-    ("login", "Connect your StudyLife account"),
+    ("login", "Connect your StudyAtrium account"),
     ("logout", "Disconnect this chat"),
     ("whoami", "Which account this chat is connected to"),
     ("help", "What this bot can do"),
@@ -339,10 +339,10 @@ async def handle(
     except StudyLifeApiError as exc:
         if exc.status_code == 403:
             return (
-                "StudyLife refused that (403). This bot was not granted the permission it needs "
+                "StudyAtrium refused that (403). This bot was not granted the permission it needs "
                 "- re-approve it with the missing scope."
             )
-        return f"StudyLife could not be reached right now ({exc.status_code})."
+        return f"StudyAtrium could not be reached right now ({exc.status_code})."
 
 
 async def _dispatch(

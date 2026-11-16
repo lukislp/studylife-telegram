@@ -18,7 +18,7 @@ class StudyLifeApiError(Exception):
     (403, never self-healing) from a transient one."""
 
     def __init__(self, status_code: int, body: str) -> None:
-        super().__init__(f"StudyLife API returned {status_code}: {body.strip()[:200]}")
+        super().__init__(f"StudyAtrium API returned {status_code}: {body.strip()[:200]}")
         self.status_code = status_code
         self.body = body
 

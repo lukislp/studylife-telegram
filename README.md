@@ -1,11 +1,13 @@
-# StudyLife Telegram Bot
+# StudyAtrium Telegram Bot
+
+(formerly StudyLife)
 
 [![CI](https://github.com/lukislp/studylife-telegram/actions/workflows/ci.yml/badge.svg)](https://github.com/lukislp/studylife-telegram/actions/workflows/ci.yml) [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/lukislp/studylife-telegram/badge)](https://scorecard.dev/viewer/?uri=github.com/lukislp/studylife-telegram) [![CodeQL](https://github.com/lukislp/studylife-telegram/actions/workflows/github-code-scanning/codeql/badge.svg)](https://github.com/lukislp/studylife-telegram/security/code-scanning)
 [![Release](https://img.shields.io/github/v/release/lukislp/studylife-telegram)](https://github.com/lukislp/studylife-telegram/releases)
 [![License: AGPL-3.0](https://img.shields.io/github/license/lukislp/studylife-telegram)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.12+-3776AB)](https://www.python.org/)
 
-Control your [StudyLife](https://github.com/lukislp/studylife) focus timer from Telegram, and get
+Control your [StudyAtrium](https://github.com/lukislp/studylife) focus timer from Telegram, and get
 session events and goal reminders in the chat you already have open.
 
 The timer is shared across every device, so a session started here shows up in the web app, the
@@ -24,7 +26,7 @@ tray app, VS Code and Home Assistant alike — and the other way round.
 | `/agenda` | Your next planned study sessions |
 | `/courses` | List your courses |
 | `/note <text>` | Save a quick note (first line becomes the title) |
-| `/login [instance]` | Connect your StudyLife account |
+| `/login [instance]` | Connect your StudyAtrium account |
 | `/logout` | Disconnect this chat |
 | `/whoami` | Which account this chat is connected to |
 | `/help` | The list above |
@@ -35,7 +37,7 @@ the timer row has no course column, so there would be nothing to attribute the t
 
 ### Accounts
 
-Every chat drives its OWN StudyLife account. `/login` replies with a consent link; approving it
+Every chat drives its OWN StudyAtrium account. `/login` replies with a consent link; approving it
 in the browser sends you back to this bot, which stores the resulting API key for your chat. No
 file to edit, nothing to install.
 
@@ -52,8 +54,8 @@ Two things are deliberate:
 
 ### Reminders
 
-The bot messages you before each planned session, at the same lead times StudyLife itself
-uses (`60,30,10,5,3,2,1` minutes by default). This is polled rather than pushed: StudyLife
+The bot messages you before each planned session, at the same lead times StudyAtrium itself
+uses (`60,30,10,5,3,2,1` minutes by default). This is polled rather than pushed: StudyAtrium
 publishes no "a session is about to start" event - its webhook catalogue is reactive
 (`session.created` fires when you PLAN a session, not when it comes due), so the bot watches
 the clock itself, exactly as the web app's own client does.
@@ -69,11 +71,11 @@ Worth knowing:
 
 `/focus Betriebssysteme` matches case-insensitively, exact name first, then unique prefix. An
 **ambiguous** prefix is refused rather than guessed: putting study time on the wrong course would
-distort the grade and ECTS correlations StudyLife computes from session history.
+distort the grade and ECTS correlations StudyAtrium computes from session history.
 
 ## Security model
 
-Each Telegram chat links to **its own** StudyLife account: `/login` runs StudyLife's generic
+Each Telegram chat links to **its own** StudyAtrium account: `/login` runs StudyAtrium's generic
 dynamic-client consent flow (PKCE, callback on this bot's `PUBLIC_BASE_URL`) and stores the
 resulting per-chat API key encrypted at rest (`LINK_ENCRYPTION_KEY`, SQLite at `LINK_DB_PATH`).
 The bot never holds an account-wide key, and a chat can only ever reach the account it linked -
@@ -90,12 +92,12 @@ the single-use `/login` state is what binds a callback to a chat. Three things p
 3. **Instance pinning.** `/login` connects to `STUDYLIFE_BASE_URL` and the instances listed in
    `STUDYLIFE_EXTRA_INSTANCES`, nothing else, unless `STUDYLIFE_ALLOW_ANY_INSTANCE` is set.
 
-StudyLife's own webhooks into this bot are authenticated separately, with HMAC-SHA256 over the
+StudyAtrium's own webhooks into this bot are authenticated separately, with HMAC-SHA256 over the
 raw request body — the same scheme `studylife-webhooks` uses for every other subscriber.
 
 ## Setup
 
-### 1. Register the client on your StudyLife instance
+### 1. Register the client on your StudyAtrium instance
 
 Register once through [studylife-developers](https://github.com/lukislp/studylife-developers):
 
@@ -149,15 +151,15 @@ Rotating it breaks no data, but every chat has to `/login` again.
 | `STUDYLIFE_EXTRA_INSTANCES` | no | Further instances users may connect to |
 | `STUDYLIFE_ALLOW_ANY_INSTANCE` | no | `true` allows any https instance |
 | `LINK_ENCRYPTION_KEY` | yes | Fernet key encrypting the stored API keys |
-| `STUDYLIFE_WEBHOOK_SECRET` | no | Enables the StudyLife → Telegram direction |
-| `PUBLIC_BASE_URL` | yes | Where StudyLife returns to after `/login` |
+| `STUDYLIFE_WEBHOOK_SECRET` | no | Enables the StudyAtrium → Telegram direction |
+| `PUBLIC_BASE_URL` | yes | Where StudyAtrium returns to after `/login` |
 | `LINK_DB_PATH` | no | SQLite file with the chat→account links (default `/app/data/links.db`) |
-| `STUDYLIFE_TIMEZONE` | no | Zone StudyLife's timestamps mean (default `Europe/Berlin`) |
+| `STUDYLIFE_TIMEZONE` | no | Zone StudyAtrium's timestamps mean (default `Europe/Berlin`) |
 | `SESSION_REMINDER_MINUTES` | no | Lead times before a session; empty switches reminders off |
 | `REMINDER_TICK_SECONDS` | no | How often the clock is checked (default 30) |
 | `REMINDER_REFRESH_SECONDS` | no | How often the session list is re-read (default 300) |
 
-`STUDYLIFE_TIMEZONE` is not cosmetic. StudyLife's timestamps carry no UTC offset and mean
+`STUDYLIFE_TIMEZONE` is not cosmetic. StudyAtrium's timestamps carry no UTC offset and mean
 the server's local wall clock; this container would otherwise run UTC and every reminder
 would fire an hour or two off.
 
@@ -177,12 +179,12 @@ curl -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
 | Route | Purpose |
 | --- | --- |
 | `POST /telegram` | Updates from Telegram |
-| `POST /webhooks/studylife` | StudyLife's outgoing webhooks |
-| `GET /connect/callback` | Where StudyLife returns from a `/login` approval |
+| `POST /webhooks/studylife` | StudyAtrium's outgoing webhooks |
+| `GET /connect/callback` | Where StudyAtrium returns from a `/login` approval |
 | `GET /healthz` | Liveness/readiness probe |
 
 Both inbound routes answer `200` for anything they choose to ignore. Telegram retries a non-2xx
-and eventually disables the webhook entirely, and StudyLife's delivery service behaves the same —
+and eventually disables the webhook entirely, and StudyAtrium's delivery service behaves the same —
 so "received but not acted on" must never look like a failure.
 
 ## Development

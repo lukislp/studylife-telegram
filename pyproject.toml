@@ -1,7 +1,7 @@
 [project]
 name = "studylife-telegram"
 version = "0.0.0"
-description = "Telegram bot for StudyLife: control the focus timer and get study reminders in chat."
+description = "Telegram bot for StudyAtrium: control the focus timer and get study reminders in chat."
 readme = "README.md"
 requires-python = ">=3.12"
 license = "AGPL-3.0-or-later"

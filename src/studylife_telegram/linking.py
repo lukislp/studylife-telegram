@@ -110,15 +110,15 @@ async def exchange_assertion(
                 },
             )
         except httpx.HTTPError as exc:
-            raise LinkError("Could not reach StudyLife to finish connecting.") from exc
+            raise LinkError("Could not reach StudyAtrium to finish connecting.") from exc
     if response.status_code == 401:
         raise LinkError("That approval is no longer valid. Send /login and try again.")
     if response.status_code >= 400:
-        raise LinkError(f"StudyLife refused the connection ({response.status_code}).")
+        raise LinkError(f"StudyAtrium refused the connection ({response.status_code}).")
     payload = response.json()
     api_key = payload.get("apiKey")
     if not api_key:
-        raise LinkError("StudyLife returned no API key.")
+        raise LinkError("StudyAtrium returned no API key.")
     user_id = payload.get("userId")
     return str(api_key), None if user_id is None else str(user_id)
 
