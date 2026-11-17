@@ -79,6 +79,7 @@ COMMANDS: list[tuple[str, str]] = [
     ("courses", "List your courses"),
     ("note", "Save a quick note"),
     ("login", "Connect your StudyAtrium account"),
+    ("confirm", "Finish connecting with the code shown in your browser"),
     ("logout", "Disconnect this chat"),
     ("whoami", "Which account this chat is connected to"),
     ("help", "What this bot can do"),
@@ -86,7 +87,7 @@ COMMANDS: list[tuple[str, str]] = [
 
 # Answerable without a connected account. Everything else needs one, and main.py says so rather
 # than letting the command fail somewhere deeper with a confusing error.
-ACCOUNT_FREE_COMMANDS = frozenset({"login", "logout", "whoami", "help", "start"})
+ACCOUNT_FREE_COMMANDS = frozenset({"login", "confirm", "logout", "whoami", "help", "start"})
 
 
 class ParsedCommand:
