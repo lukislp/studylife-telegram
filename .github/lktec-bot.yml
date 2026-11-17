@@ -16,6 +16,9 @@ modules:
     merge-ready: true
     # Dependency names (exact, case-insensitive) that are never approved or armed.
     exclude: []
+    # Renovate pull requests (renovate[bot], renovate/ branches) are treated like Dependabot
+    # ones: minor, patch and digest updates are armed.
+    renovate: true
   # Tags and publishes a release from the Conventional Commits on the default branch (see
   # docs/modules/release.md in lukislp/lktec-bot).
   release:
