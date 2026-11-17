@@ -4,6 +4,8 @@
   GET  /connect/callback   - where StudyLife returns from a /login approval (shows a code that
                              must then be typed into the chat - see confirmation.py)
   POST /webhooks/studylife - StudyLife's outgoing webhooks (HMAC-SHA256 over the raw body)
+  POST /internal/users/{id}/purge - StudyAtrium's server on account deletion (shared secret);
+                             cluster-internal, deliberately not on the public funnel
 
 The Telegram and StudyLife routes answer 200 for anything they choose not to act on. Telegram
 retries a non-2xx and eventually disables the webhook, and StudyLife's delivery service does the
@@ -25,7 +27,7 @@ from functools import lru_cache
 from html import escape
 from typing import Any
 
-from fastapi import FastAPI, Header, Request, Response
+from fastapi import Depends, FastAPI, Header, HTTPException, Path, Request, Response
 from fastapi.responses import HTMLResponse
 
 from .commands import (
@@ -50,6 +52,7 @@ from .linking import (
     new_state,
     normalise_instance,
 )
+from .purge import PurgeRequest, purge_account
 from .reminders import ReminderLoop
 from .store import LinkedAccount, LinkStore, PendingLink
 from .studylife_client import StudyLifeClient
@@ -57,6 +60,7 @@ from .telegram_client import TelegramApiError, TelegramClient
 from .times import zone
 from .verify import (
     is_allowed_chat,
+    verify_purge_secret,
     verify_studylife_signature,
     verify_telegram_secret,
     wants_announcement,
@@ -358,6 +362,31 @@ def _page(title: str, body: str) -> HTMLResponse:
         f"text-align:center'><h1>{escape(title)}</h1><p>{escape(body)}</p>",
         headers={"Cache-Control": "no-store"},  # the page can carry a live confirmation code
     )
+
+
+def require_purge_secret(
+    x_studylife_shared_secret: str | None = Header(default=None),
+) -> None:
+    secret = get_settings().studylife_purge_secret
+    if not secret:
+        # Off, not open: without a configured secret nobody may purge anything.
+        raise HTTPException(status_code=503)
+    if not verify_purge_secret(secret, x_studylife_shared_secret):
+        raise HTTPException(status_code=401)
+
+
+@app.post("/internal/users/{user_id}/purge", status_code=204)
+async def purge_user(
+    request: Request,
+    user_id: int = Path(gt=0),
+    body: PurgeRequest | None = None,
+    _: None = Depends(require_purge_secret),
+) -> Response:
+    """Cluster-internal, called by StudyAtrium's server when an account is deleted."""
+    await purge_account(
+        request.app.state.store, request.app.state.runs, user_id, body or PurgeRequest()
+    )
+    return Response(status_code=204)
 
 
 @app.post("/webhooks/studylife")

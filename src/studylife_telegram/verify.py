@@ -63,6 +63,14 @@ def verify_studylife_signature(secret: str, signature_hex: str | None, body: byt
     return _equal(expected, signature_hex)
 
 
+def verify_purge_secret(expected: str | None, received: str | None) -> bool:
+    """Constant-time check of the shared secret on the account-purge route. An unset secret
+    never matches; the route answers 503 for that case before asking."""
+    if not received or not expected:
+        return False
+    return _equal(expected, received)
+
+
 def is_allowed_chat(allowed: frozenset[int], chat_id: int | None) -> bool:
     """Whether this chat may drive the account. See Settings.telegram_allowed_chat_ids for why
     an allowlist is not optional here."""

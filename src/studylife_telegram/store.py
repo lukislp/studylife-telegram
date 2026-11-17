@@ -16,6 +16,7 @@ k8s/02-app.yaml pins replicas to one.
 
 from __future__ import annotations
 
+import hashlib
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -83,6 +84,24 @@ class PendingConfirmation:
     studylife_user_id: str | None
     attempts: int
     created_at: float
+
+
+@dataclass(frozen=True)
+class PurgeOutcome:
+    """What an account purge removed. `chat_ids` is for the caller's in-memory bookkeeping only
+    and must never be logged; the counts are what may appear in a log line."""
+
+    chat_ids: frozenset[int]
+    links: int
+    confirmations: int
+    pending_links: int
+
+
+def token_fingerprint(token: str) -> str:
+    """Lookup fingerprint of an issued token: lowercase hex SHA-256, the same digest as
+    StudyAtrium's AuthSessionService. It is an identifier the server already sends us, not a
+    password hash; the tokens are high-entropy random values."""
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
 class LinkStore:
@@ -249,6 +268,62 @@ class LinkStore:
             if account is not None:
                 accounts.append(account)
         return accounts
+
+    # --- account deletion -----------------------------------------------------------------
+
+    async def purge_by_key_hashes(self, key_hashes: frozenset[str]) -> PurgeOutcome:
+        """Deletes everything held for the API keys with these SHA-256 hashes, in one
+        transaction: the links, the approvals still waiting for their code, and any /login
+        started from a chat that just lost its link.
+
+        Matched by key hash, not by user id: ids are only unique per StudyAtrium instance and
+        this bot serves several. A row whose key cannot be decrypted (rotated encryption key)
+        cannot be matched and stays; it is unusable anyway and goes with /logout or a re-login.
+        Matching nothing is not an error - the call is idempotent.
+        """
+        if not key_hashes:
+            return PurgeOutcome(frozenset(), 0, 0, 0)
+        conn = self._conn
+        try:
+            link_chats = await self._chats_with_key_in("linked_accounts", key_hashes)
+            confirmation_chats = await self._chats_with_key_in("pending_confirmations", key_hashes)
+            chats = link_chats | confirmation_chats
+            pending_links = 0
+            for chat_id in chats:
+                cursor = await conn.execute(
+                    "DELETE FROM pending_links WHERE chat_id = ?", (chat_id,)
+                )
+                pending_links += cursor.rowcount
+            for chat_id in link_chats:
+                await conn.execute("DELETE FROM linked_accounts WHERE chat_id = ?", (chat_id,))
+            for chat_id in confirmation_chats:
+                await conn.execute(
+                    "DELETE FROM pending_confirmations WHERE chat_id = ?", (chat_id,)
+                )
+            await conn.commit()
+        except BaseException:
+            await conn.rollback()
+            raise
+        return PurgeOutcome(
+            chat_ids=frozenset(chats),
+            links=len(link_chats),
+            confirmations=len(confirmation_chats),
+            pending_links=pending_links,
+        )
+
+    async def _chats_with_key_in(self, table: str, key_hashes: frozenset[str]) -> set[int]:
+        # `table` is one of two internal literals, never caller input.
+        async with self._conn.execute(f"SELECT chat_id, encrypted_api_key FROM {table}") as cursor:
+            rows = await cursor.fetchall()
+        matched = set()
+        for chat_id, encrypted in rows:
+            try:
+                token = self._fernet.decrypt(encrypted).decode("utf-8")
+            except InvalidToken:
+                continue
+            if token_fingerprint(token) in key_hashes:
+                matched.add(chat_id)
+        return matched
 
     def _row_to_account(self, chat_id: int, row: Any) -> LinkedAccount | None:
         if row is None:
