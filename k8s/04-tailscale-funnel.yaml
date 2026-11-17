@@ -14,7 +14,9 @@
 # update here), /webhooks/studylife (StudyLife's servers call this for session and goal
 # events) and /connect/callback (where a user's BROWSER lands after approving /login - the
 # only one of the three a person ever sees). /healthz is deliberately absent - operator-only,
-# no reason to be internet-facing.
+# no reason to be internet-facing. Likewise /internal/ (the account-purge route StudyAtrium's
+# server calls) must NEVER be added here: it is reached in-cluster only, see
+# allow-studylife-server-to-studylife-telegram in k8s/03-network-policies.yaml.
 #
 # Bootstrap-only, NOT Flux-managed - same RBAC reasoning as k8s/00-namespace.yaml/
 # k8s/01-secret.yaml/k8s/03-network-policies.yaml (kustomize-controller's ClusterRole has no

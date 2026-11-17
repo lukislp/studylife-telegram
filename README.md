@@ -160,6 +160,7 @@ Rotating it breaks no data, but every chat has to `/login` again.
 | `LINK_ENCRYPTION_KEY` | yes | Fernet key encrypting the stored API keys |
 | `STUDYLIFE_WEBHOOK_SECRET` | no | Enables the StudyAtrium → Telegram direction |
 | `PUBLIC_BASE_URL` | yes | Where StudyAtrium returns to after `/login` |
+| `STUDYLIFE_PURGE_SECRET` | no | Enables account-deletion purges (see below); unset = route answers 503 |
 | `LINK_DB_PATH` | no | SQLite file with the chat→account links (default `/app/data/links.db`) |
 | `STUDYLIFE_TIMEZONE` | no | Zone StudyAtrium's timestamps mean (default `Europe/Berlin`) |
 | `SESSION_REMINDER_MINUTES` | no | Lead times before a session; empty switches reminders off |
@@ -188,11 +189,36 @@ curl -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
 | `POST /telegram` | Updates from Telegram |
 | `POST /webhooks/studylife` | StudyAtrium's outgoing webhooks |
 | `GET /connect/callback` | Where StudyAtrium returns from a `/login` approval |
+| `POST /internal/users/{id}/purge` | Account deletion (cluster-internal, shared secret) |
 | `GET /healthz` | Liveness/readiness probe |
 
 Both inbound routes answer `200` for anything they choose to ignore. Telegram retries a non-2xx
 and eventually disables the webhook entirely, and StudyAtrium's delivery service behaves the same —
 so "received but not acted on" must never look like a failure.
+
+## Account deletion (purge)
+
+When a user deletes their StudyAtrium account, the server calls this bot so nothing is left
+behind (GDPR Art. 17). See [PRIVACY.md](PRIVACY.md) for what the bot stores.
+
+```
+POST /internal/users/{user_id}/purge
+X-StudyLife-Shared-Secret: <STUDYLIFE_PURGE_SECRET>
+{"key_hashes": ["<sha256 hex of an API key issued to this bot>", ...]}
+```
+
+- `key_hashes` are the lowercase hex SHA-256 of every API key the server issued to this bot for
+  that user (at most 50, each exactly 64 hex characters; otherwise `422`). The bot hashes each
+  stored key and deletes the matching links, any approval still waiting for its code, and the
+  open `/login` of those chats, in one transaction. Matching is by key, not by user id, because
+  user ids are only unique per StudyAtrium instance and this bot serves several.
+- `204` on success, also when nothing matched or on a repeat call. `401` for a wrong or missing
+  secret, `503` when `STUDYLIFE_PURGE_SECRET` is unset (the route is never open without one).
+- The chat is not messaged: the account is already gone. The log gets the user id and counts only.
+- The route is cluster-internal. It is not on the public funnel (`k8s/04-tailscale-funnel.yaml`),
+  and `k8s/03-network-policies.yaml` lets only the StudyAtrium server pods reach the port. On the
+  server, configure `AddonPurge:Telegram:BaseUrl` and `AddonPurge:Telegram:SharedSecret` (the
+  same value as `STUDYLIFE_PURGE_SECRET`).
 
 ## Development
 

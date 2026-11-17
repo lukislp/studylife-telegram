@@ -57,6 +57,12 @@ class Settings(BaseSettings):
     # session events); commands work without it.
     studylife_webhook_secret: str | None = None
 
+    # Shared secret for POST /internal/users/{id}/purge, which StudyAtrium's server calls when a
+    # user deletes their account (X-StudyLife-Shared-Secret header, compared in constant time).
+    # Unset or empty switches the route off (503) - it is never open without a secret. The route
+    # is cluster-internal: it is not on the public funnel, see k8s/04-tailscale-funnel.yaml.
+    studylife_purge_secret: str | None = None
+
     # Public base URL this bot is reachable at, used by the one-off webhook registration helper.
     # Telegram only delivers to HTTPS with a valid certificate.
     public_base_url: AnyHttpUrl | None = None

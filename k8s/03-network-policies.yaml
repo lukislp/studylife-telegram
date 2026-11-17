@@ -44,3 +44,25 @@ spec:
         - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: tailscale } }
       ports:
         - { protocol: TCP, port: 8000 }
+---
+# Lets StudyAtrium's own server pods call POST /internal/users/{id}/purge when a user deletes
+# their account. Cluster-internal on purpose: the route is not on the funnel
+# (k8s/04-tailscale-funnel.yaml) and this is the only in-cluster path to it. The server runs in
+# the studylife-scale namespace (studylife repo k8s/04-web.yaml, k8s/05-worker.yaml); the
+# worker is included in case the outbox that delivers the call is hosted there.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-studylife-server-to-studylife-telegram
+  namespace: studylife-telegram
+spec:
+  podSelector: { matchLabels: { app: studylife-telegram } }
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: studylife-scale } }
+          podSelector:
+            matchExpressions:
+              - { key: app, operator: In, values: [studylife-web, studylife-worker] }
+      ports:
+        - { protocol: TCP, port: 8000 }
