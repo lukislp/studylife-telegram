@@ -97,10 +97,11 @@ class PurgeOutcome:
     pending_links: int
 
 
-def hash_api_key(api_key: str) -> str:
-    """Lowercase hex SHA-256 of the key, the same digest StudyAtrium's AuthSessionService
-    produces, which is how the server identifies the keys it issued to this bot."""
-    return hashlib.sha256(api_key.encode("utf-8")).hexdigest()
+def token_fingerprint(token: str) -> str:
+    """Lookup fingerprint of an issued token: lowercase hex SHA-256, the same digest as
+    StudyAtrium's AuthSessionService. It is an identifier the server already sends us, not a
+    password hash; the tokens are high-entropy random values."""
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
 class LinkStore:
@@ -317,10 +318,10 @@ class LinkStore:
         matched = set()
         for chat_id, encrypted in rows:
             try:
-                key = self._fernet.decrypt(encrypted).decode("utf-8")
+                token = self._fernet.decrypt(encrypted).decode("utf-8")
             except InvalidToken:
                 continue
-            if hash_api_key(key) in key_hashes:
+            if token_fingerprint(token) in key_hashes:
                 matched.add(chat_id)
         return matched
 

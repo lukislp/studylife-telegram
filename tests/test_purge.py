@@ -10,7 +10,7 @@ from cryptography.fernet import Fernet
 from studylife_telegram import main
 from studylife_telegram.commands import RunTracker
 from studylife_telegram.config import Settings
-from studylife_telegram.store import LinkStore, PendingLink, hash_api_key
+from studylife_telegram.store import LinkStore, PendingLink, token_fingerprint
 
 INSTANCE = "https://studylife.example"
 SECRET = "purge-secret"
@@ -191,7 +191,7 @@ class TestPurgeByKeyHashes:
         assert await store.get(1) is not None
 
     async def test_hash_matches_the_servers_digest(self) -> None:
-        assert hash_api_key("abc") == hashlib.sha256(b"abc").hexdigest()
+        assert token_fingerprint("abc") == hashlib.sha256(b"abc").hexdigest()
 
     async def test_unreadable_rows_are_skipped_not_fatal(self, tmp_path) -> None:
         path = str(tmp_path / "links.db")
