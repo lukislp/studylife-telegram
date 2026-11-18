@@ -59,7 +59,7 @@ class StudyLifeClient:
         return list((await self._request("GET", "/api/courses")).json())
 
     async def get_metrics_summary(self) -> dict[str, Any]:
-        """Every study figure this bot reports comes from here - the one place StudyLife
+        """Every study figure this bot reports comes from here - the one place StudyAtrium
         calculates them (see MetricsController). Recomputing any of them locally would
         eventually disagree with the web app over some edge case nobody thought to check."""
         return dict((await self._request("GET", "/api/metrics/summary")).json())

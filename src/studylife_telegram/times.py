@@ -1,4 +1,4 @@
-"""Time arithmetic against StudyLife's naive-local timestamps.
+"""Time arithmetic against StudyAtrium's naive-local timestamps.
 
 StudySessionDto.StartTime/EndTime are C# DateTime values that carry no offset in the JSON, and
 SessionService treats them as the SERVER's local wall clock on purpose (see its Z1 comments and
@@ -30,7 +30,7 @@ def zone(name: str) -> tzinfo:
 
 
 def parse_local(value: Any, tz: tzinfo) -> datetime | None:
-    """One StudyLife timestamp as an aware datetime, or None if it is unusable.
+    """One StudyAtrium timestamp as an aware datetime, or None if it is unusable.
 
     An offset IS honoured when present - the server does not send one today, but a future
     version that starts to would otherwise be misread by exactly the offset it just added.

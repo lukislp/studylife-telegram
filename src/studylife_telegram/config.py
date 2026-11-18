@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     # missing, must never be the thing that opens the bot to the internet.
     telegram_allow_any_chat: bool = False
 
-    # The default StudyLife instance: what /login connects to when no URL is given, and - unless
+    # The default StudyAtrium instance: what /login connects to when no URL is given, and - unless
     # studylife_allow_any_instance is set - the only one permitted.
     studylife_base_url: AnyHttpUrl
 
@@ -38,7 +38,7 @@ class Settings(BaseSettings):
     studylife_extra_instances: str = ""
 
     # Lets users name ANY https instance. For a public deployment where people bring their own
-    # StudyLife. Off by default: without the restriction, "/login https://attacker.example" turns
+    # StudyAtrium. Off by default: without the restriction, "/login https://attacker.example" turns
     # the bot into a request forwarder with the cluster's network position. Check this pod's
     # egress NetworkPolicy before switching it on.
     studylife_allow_any_instance: bool = False
@@ -52,8 +52,8 @@ class Settings(BaseSettings):
     # SQLite file holding chat -> account links (store.py). On the persistent volume.
     link_db_path: str = "/app/data/links.db"
 
-    # HMAC-SHA256 secret StudyLife signs each webhook delivery with, entered when registering
-    # this bot's webhook. Only needed for the StudyLife -> Telegram direction (reminders,
+    # HMAC-SHA256 secret StudyAtrium signs each webhook delivery with, entered when registering
+    # this bot's webhook. Only needed for the StudyAtrium -> Telegram direction (reminders,
     # session events); commands work without it.
     studylife_webhook_secret: str | None = None
 
@@ -67,13 +67,13 @@ class Settings(BaseSettings):
     # Telegram only delivers to HTTPS with a valid certificate.
     public_base_url: AnyHttpUrl | None = None
 
-    # The zone StudyLife's naive timestamps are in. StudySessionDto.StartTime carries no offset
+    # The zone StudyAtrium's naive timestamps are in. StudySessionDto.StartTime carries no offset
     # and means the SERVER's wall clock (studylife-web runs Europe/Berlin); this pod runs UTC
     # unless told otherwise, so the conversion has to be explicit. See times.parse_local.
     studylife_timezone: str = "Europe/Berlin"
 
     # Minutes before a planned session to send a reminder, mirroring the default of
-    # UserSettings.SessionReminderMinutes in StudyLife itself. Empty switches reminders off.
+    # UserSettings.SessionReminderMinutes in StudyAtrium itself. Empty switches reminders off.
     session_reminder_minutes: str = "60,30,10,5,3,2,1"
 
     # How often the reminder loop checks the clock, and how often it re-reads the session list.

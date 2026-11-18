@@ -1,5 +1,5 @@
 # Default-deny ingress baseline; egress stays open (outgoing calls to Telegram's Bot API and
-# StudyLife's own API, same open-egress strategy as every other StudyLife add-on's own
+# StudyAtrium's own API, same open-egress strategy as every other StudyAtrium add-on's own
 # network-policies file). Bootstrap-only, NOT Flux-managed - kustomize-controller's ClusterRole
 # (studylife repo's k8s/flux/06-reconciler-rbac.yaml) has no "networkpolicies" permission.
 apiVersion: networking.k8s.io/v1

@@ -1,4 +1,4 @@
-"""Which Telegram chat is connected to which StudyLife account.
+"""Which Telegram chat is connected to which StudyAtrium account.
 
 Telegram, unlike Alexa, hands the bot no token on an incoming update - only a chat id. Alexa's
 skill can therefore stay stateless and resolve its per-request access token to a key

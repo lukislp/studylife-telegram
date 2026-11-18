@@ -13,7 +13,7 @@ from typing import Any
 from .studylife_client import StudyLifeApiError, StudyLifeClient
 from .times import parse_local, sum_hours_on
 
-# Focus/break lengths of StudyLife's built-in presets. Needed because PhaseEndsAt is an absolute
+# Focus/break lengths of StudyAtrium's built-in presets. Needed because PhaseEndsAt is an absolute
 # instant the CLIENT computes - the server only stores what it is handed (TimerStateService just
 # rebases it onto its own clock via ClientNow). Custom modes (id >= 100) live in the user's
 # settings, which this bot has no scope to read, so a session already using one keeps its mode
@@ -273,7 +273,7 @@ def _find_course_id(courses: list[dict[str, Any]], wanted: str) -> int | None:
 
 
 def _wire_time(value: datetime) -> str:
-    """One timestamp in the form StudyLife uses everywhere: local wall clock, no offset."""
+    """One timestamp in the form StudyAtrium uses everywhere: local wall clock, no offset."""
     return value.replace(tzinfo=None).isoformat(timespec="seconds")
 
 
@@ -294,7 +294,7 @@ def next_timer_state(
         "currentRound": current_round if isinstance(current_round, int) else 1,
         "timerModeId": mode_id or current.get("timerModeId") or 1,
         "phaseEndsAt": None,
-        # Naive local, like every other timestamp StudyLife exchanges: the server compares
+        # Naive local, like every other timestamp StudyAtrium exchanges: the server compares
         # these against DateTime.Now, and an offset-carrying value relies on .NET converting
         # it back to exactly the same zone. See times.py.
         "clientNow": _wire_time(now),
@@ -309,7 +309,7 @@ def next_timer_state(
 
     if action == "pause":
         # The clock stops, the session stays. The remaining time cannot be carried - the wire
-        # shape has nowhere to put it (StudyLife's own client keeps it in a private field it
+        # shape has nowhere to put it (StudyAtrium's own client keeps it in a private field it
         # never sends), so resuming starts the phase over. Documented in README.
         return state
 

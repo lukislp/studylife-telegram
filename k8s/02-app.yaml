@@ -9,7 +9,7 @@ metadata:
 spec:
   accessModes: ["ReadWriteOnce"]
   # Longhorn (cross-node-replicated, homelab-infra/cluster/11-longhorn-values.yaml) rather than
-  # the cluster default local-path: links.db is what connects each chat to a StudyLife account,
+  # the cluster default local-path: links.db is what connects each chat to a StudyAtrium account,
   # and losing it means everyone has to /login again.
   storageClassName: longhorn
   resources:
