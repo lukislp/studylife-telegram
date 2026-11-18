@@ -18,7 +18,7 @@ permissions:
 
 jobs:
   lockfiles:
-    uses: lukislp/lktec-bot/.github/workflows/lockfiles.yml@28c711f668a7fcc6cdfe8fcd7f321a726b8189df # v0.11.0
+    uses: lukislp/lktec-bot/.github/workflows/lockfiles.yml@2dcad4e0d341492424c08c9569fc39521f9691d8 # v0.12.0
     with:
       uv-version: "0.12.18"
     secrets:
