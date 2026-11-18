@@ -13,11 +13,11 @@ from __future__ import annotations
 import hashlib
 import hmac
 
-# Events this bot turns into a chat message. Everything else StudyLife may send is accepted
+# Events this bot turns into a chat message. Everything else StudyAtrium may send is accepted
 # (signature checked, 200 returned) and silently ignored, so adding an event type upstream never
 # makes deliveries start failing here.
 # Every name here exists in the server's own catalogue (WebhookEventTypes.cs). That is not a
-# formality: "goal.due" used to sit in this set and can never arrive, because StudyLife has no
+# formality: "goal.due" used to sit in this set and can never arrive, because StudyAtrium has no
 # such event - the branch was unreachable and nothing reported it.
 _ANNOUNCED_EVENTS = frozenset(
     {

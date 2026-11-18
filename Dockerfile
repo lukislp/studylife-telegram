@@ -43,9 +43,9 @@ COPY src ./src
 RUN uv sync --frozen --no-dev
 
 # No data directory needed - unlike studylife-alexa/studylife-mcp, this bot holds no
-# SQLite store: the single StudyLife API key lives in an env var (login.py writes it to
+# SQLite store: the single StudyAtrium API key lives in an env var (login.py writes it to
 # a local .env at bootstrap time, never inside the container), and every command handler
-# is a stateless read/write against StudyLife's own API.
+# is a stateless read/write against StudyAtrium's own API.
 RUN useradd --create-home --uid 1000 appuser
 USER appuser
 

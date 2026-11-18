@@ -11,7 +11,7 @@
 # what actually lets its traffic reach the pod.
 #
 # Explicit path allowlist, NOT a defaultBackend: /telegram (Telegram's servers deliver every
-# update here), /webhooks/studylife (StudyLife's servers call this for session and goal
+# update here), /webhooks/studylife (StudyAtrium's servers call this for session and goal
 # events) and /connect/callback (where a user's BROWSER lands after approving /login - the
 # only one of the three a person ever sees). /healthz is deliberately absent - operator-only,
 # no reason to be internet-facing. Likewise /internal/ (the account-purge route StudyAtrium's

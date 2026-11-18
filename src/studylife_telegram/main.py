@@ -121,7 +121,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.runs = RunTracker()
     app.state.tz = zone(settings.studylife_timezone)
 
-    # Reminders for planned sessions. StudyLife publishes no "session is about to start" event
+    # Reminders for planned sessions. StudyAtrium publishes no "session is about to start" event
     # (see WebhookEventTypes - its catalogue is reactive), so the bot has to watch the clock
     # itself, exactly as the app's own client does from UserSettings.SessionReminderMinutes.
     app.state.reminders = ReminderLoop(
@@ -294,7 +294,7 @@ async def _start_login(store: LinkStore, settings: Settings, chat_id: int, argum
         challenge,
     )
     # The browser hint is not decoration. Telegram's built-in browser reports WebAuthn as
-    # supported but cannot reach the platform authenticator, so StudyLife's passkey sign-in
+    # supported but cannot reach the platform authenticator, so StudyAtrium's passkey sign-in
     # fails there with a generic "Anmeldung hat nicht geklappt" that names no cause. Everyone
     # using this bot would hit it exactly once and have no way to work out why.
     return (
@@ -308,7 +308,7 @@ async def _start_login(store: LinkStore, settings: Settings, chat_id: int, argum
 
 @app.get("/connect/callback")
 async def connect_callback(request: Request, state: str = "", assertion: str = "") -> Response:
-    """Where StudyLife sends the browser after a /login approval.
+    """Where StudyAtrium sends the browser after a /login approval.
 
     Public by necessity - the whole point is that it works from a phone. The state is what binds
     this callback to a chat, and it is single-use; the PKCE verifier it carries never left this
@@ -412,7 +412,7 @@ async def studylife_webhook(
     text = _announcement_text(payload)
     if text:
         # Broadcast to every connected chat. This endpoint carries no account identity - the
-        # signature proves only that SOME StudyLife instance sent it - so it is only meaningful
+        # signature proves only that SOME StudyAtrium instance sent it - so it is only meaningful
         # in a single-account deployment. Left in place for that case; a multi-account
         # deployment should leave STUDYLIFE_WEBHOOK_SECRET unset, which disables the route.
         for account in await request.app.state.store.all_links():

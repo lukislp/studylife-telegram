@@ -1,4 +1,4 @@
-# Dedicated namespace - same convention as every other StudyLife add-on's own
+# Dedicated namespace - same convention as every other StudyAtrium add-on's own
 # k8s/00-namespace.yaml. Pod Security Standards: "baseline" hard-enforced (no hostPath/
 # hostNetwork/privileged needed - Secret only, no PVC), "restricted" as warn/audit only.
 #

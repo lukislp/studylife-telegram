@@ -1,4 +1,4 @@
-"""Connecting one Telegram chat to one StudyLife account.
+"""Connecting one Telegram chat to one StudyAtrium account.
 
 Same wire shape as studylife-cli's generic dynamic-client flow, with its RFC 8252 loopback
 redirect replaced by this bot's own public callback - which is what makes it usable from a phone,
@@ -52,7 +52,7 @@ def normalise_instance(url: str) -> str:
 
 
 def instance_allowed(url: str, allowed: frozenset[str], allow_any: bool) -> bool:
-    """Whether the bot may talk to this StudyLife instance.
+    """Whether the bot may talk to this StudyAtrium instance.
 
     Not a formality. Without it, `/login https://attacker.example` would make the bot fetch and
     post to whatever host a stranger names - an open request forwarder sitting inside the
