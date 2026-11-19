@@ -25,6 +25,8 @@ from typing import Any
 import aiosqlite
 from cryptography.fernet import Fernet, InvalidToken
 
+from .confirmation import CONFIRMATION_TTL_SECONDS
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS linked_accounts (
     chat_id INTEGER PRIMARY KEY,
@@ -116,7 +118,7 @@ class LinkStore:
         # WAL so a reader (the reminder loop) never blocks a writer (a callback landing).
         await self._db.execute("PRAGMA journal_mode=WAL")
         await self._db.executescript(_SCHEMA)
-        await self._db.commit()
+        await self.sweep_expired()
 
     async def close(self) -> None:
         if self._db is not None:
@@ -129,9 +131,30 @@ class LinkStore:
             raise RuntimeError("LinkStore.open() was never awaited")
         return self._db
 
+    async def sweep_expired(self, now: float | None = None) -> int:
+        """Deletes open /login requests and unconfirmed approvals older than their lifetime and
+        returns how many rows went. Without this, a login that is never completed (the link is
+        never opened, the code never typed) would sit in the file indefinitely: expiry on its
+        own only stops a row from working, it does not remove it. Runs when the store opens and
+        whenever a new login or approval is stored, so it needs no timer of its own."""
+        now = time.time() if now is None else now
+        removed = 0
+        for table, ttl in (
+            ("pending_links", PENDING_TTL_SECONDS),
+            ("pending_confirmations", CONFIRMATION_TTL_SECONDS),
+        ):
+            # `table` is one of two internal literals, never caller input.
+            cursor = await self._conn.execute(
+                f"DELETE FROM {table} WHERE created_at < ?", (now - ttl,)
+            )
+            removed += cursor.rowcount
+        await self._conn.commit()
+        return removed
+
     # --- the /login round trip ------------------------------------------------------------
 
     async def put_pending(self, pending: PendingLink) -> None:
+        await self.sweep_expired()
         await self._conn.execute(
             "INSERT OR REPLACE INTO pending_links "
             "(state, chat_id, code_verifier, instance_url, created_at) VALUES (?, ?, ?, ?, ?)",
@@ -177,6 +200,7 @@ class LinkStore:
     ) -> None:
         """One per chat: a newer approval replaces an older one, so only the latest code works.
         The API key is encrypted here too - it is a live credential while it waits."""
+        await self.sweep_expired(now)
         await self._conn.execute(
             "INSERT OR REPLACE INTO pending_confirmations "
             "(chat_id, code, encrypted_api_key, instance_url, studylife_user_id, attempts, "
@@ -271,22 +295,35 @@ class LinkStore:
 
     # --- account deletion -----------------------------------------------------------------
 
-    async def purge_by_key_hashes(self, key_hashes: frozenset[str]) -> PurgeOutcome:
+    async def purge_by_key_hashes(
+        self,
+        key_hashes: frozenset[str],
+        user_id: str | None = None,
+        instance_url: str | None = None,
+    ) -> PurgeOutcome:
         """Deletes everything held for the API keys with these SHA-256 hashes, in one
         transaction: the links, the approvals still waiting for their code, and any /login
         started from a chat that just lost its link.
 
-        Matched by key hash, not by user id: ids are only unique per StudyAtrium instance and
-        this bot serves several. A row whose key cannot be decrypted (rotated encryption key)
-        cannot be matched and stays; it is unusable anyway and goes with /logout or a re-login.
+        The key hash is the primary match. When `user_id` AND `instance_url` are both given, a
+        row stored for that user id on that instance goes too: that is what removes a link whose
+        key was revoked earlier (so the server no longer knows its hash) or whose key cannot be
+        decrypted any more (rotated encryption key). User ids are only unique per StudyAtrium
+        instance and this bot serves several, which is why the id alone is never enough.
         Matching nothing is not an error - the call is idempotent.
         """
-        if not key_hashes:
+        by_user = user_id is not None and instance_url is not None
+        if not key_hashes and not by_user:
             return PurgeOutcome(frozenset(), 0, 0, 0)
         conn = self._conn
         try:
             link_chats = await self._chats_with_key_in("linked_accounts", key_hashes)
             confirmation_chats = await self._chats_with_key_in("pending_confirmations", key_hashes)
+            if by_user:
+                link_chats |= await self._chats_of_user("linked_accounts", user_id, instance_url)
+                confirmation_chats |= await self._chats_of_user(
+                    "pending_confirmations", user_id, instance_url
+                )
             chats = link_chats | confirmation_chats
             pending_links = 0
             for chat_id in chats:
@@ -310,6 +347,29 @@ class LinkStore:
             confirmations=len(confirmation_chats),
             pending_links=pending_links,
         )
+
+    async def _chats_of_user(
+        self, table: str, user_id: str | None, instance_url: str | None
+    ) -> set[int]:
+        # `table` is one of two internal literals, never caller input.
+        async with self._conn.execute(
+            f"SELECT chat_id FROM {table} WHERE studylife_user_id = ? AND instance_url = ?",
+            (user_id, instance_url),
+        ) as cursor:
+            return {row[0] for row in await cursor.fetchall()}
+
+    async def links_for_user(self, user_id: str) -> list[LinkedAccount]:
+        """Every chat linked to this StudyAtrium user id, for delivering one user's events to
+        that user's own chats only. Ids are unique per instance, not across instances - see
+        README.md ("Webhook deliveries") for what that means for a multi-instance deployment."""
+        async with self._conn.execute(
+            "SELECT chat_id, encrypted_api_key, instance_url, studylife_user_id "
+            "FROM linked_accounts WHERE studylife_user_id = ? ORDER BY chat_id",
+            (user_id,),
+        ) as cursor:
+            rows = await cursor.fetchall()
+        accounts = [self._row_to_account(row[0], row[1:]) for row in rows]
+        return [account for account in accounts if account is not None]
 
     async def _chats_with_key_in(self, table: str, key_hashes: frozenset[str]) -> set[int]:
         # `table` is one of two internal literals, never caller input.

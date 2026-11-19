@@ -107,7 +107,7 @@ class TestPurgeRoute:
         ],
     )
     async def test_a_malformed_body_is_422(self, client, body):
-        response = await client.post("/internal/users/7/purge", json=body, headers=HEADER)
+        response = await client.post("/internal/users/99/purge", json=body, headers=HEADER)
         assert response.status_code == 422
 
     @pytest.mark.parametrize("user_id", ["0", "-3", "abc"])
@@ -117,7 +117,7 @@ class TestPurgeRoute:
 
     async def test_fifty_hashes_are_accepted(self, client):
         body = {"key_hashes": [digest(str(i)) for i in range(50)]}
-        response = await client.post("/internal/users/7/purge", json=body, headers=HEADER)
+        response = await client.post("/internal/users/99/purge", json=body, headers=HEADER)
         assert response.status_code == 204
 
     async def test_deletes_only_the_matching_rows_and_is_idempotent(self, client, store, runs):
@@ -127,7 +127,7 @@ class TestPurgeRoute:
         runs.start(2, 11, started)
         body = {"key_hashes": [digest("key-alice"), digest("key-alice-new")]}
 
-        first = await client.post("/internal/users/7/purge", json=body, headers=HEADER)
+        first = await client.post("/internal/users/99/purge", json=body, headers=HEADER)
         assert first.status_code == 204
         assert first.content == b""
 
@@ -143,16 +143,16 @@ class TestPurgeRoute:
         assert await store.take_pending("s2") is not None
         assert runs.finish(2) is not None
 
-        second = await client.post("/internal/users/7/purge", json=body, headers=HEADER)
+        second = await client.post("/internal/users/99/purge", json=body, headers=HEADER)
         assert second.status_code == 204
         assert (await store.get(2)) is not None
 
     async def test_no_body_and_unknown_hashes_are_a_204_that_changes_nothing(self, client, store):
         await seed(store)
-        assert (await client.post("/internal/users/7/purge", headers=HEADER)).status_code == 204
+        assert (await client.post("/internal/users/99/purge", headers=HEADER)).status_code == 204
         body = {"key_hashes": [digest("never-issued")]}
         assert (
-            await client.post("/internal/users/7/purge", json=body, headers=HEADER)
+            await client.post("/internal/users/99/purge", json=body, headers=HEADER)
         ).status_code == 204
         assert len(await store.all_links()) == 3
 
@@ -206,3 +206,45 @@ class TestPurgeByKeyHashes:
             assert outcome.links == 0
         finally:
             await rotated.close()
+
+
+class TestPurgeByUserId:
+    """A link whose key was revoked earlier is unreachable by key hash, because the server no
+    longer knows the key. The user id on the calling instance still finds it."""
+
+    async def test_deletes_a_link_whose_key_was_revoked_before_the_deletion(self, client, store):
+        await seed(store)
+        # No hashes at all: the server has nothing left to send for user 7.
+        response = await client.post(
+            "/internal/users/7/purge", json={"key_hashes": []}, headers=HEADER
+        )
+        assert response.status_code == 204
+        assert await store.get(1) is None  # user 7 on the calling instance
+        assert await store.get_confirmation(4) is None
+        assert await store.take_pending("s1") is None
+        # Same id on another instance, and other users, stay.
+        assert await store.get(3) is not None
+        assert await store.get(2) is not None
+        assert await store.get_confirmation(5) is not None
+
+    async def test_deletes_a_link_whose_key_can_no_longer_be_decrypted(self, tmp_path):
+        path = str(tmp_path / "links.db")
+        old = LinkStore(path, Fernet.generate_key().decode())
+        await old.open()
+        await old.link(1, "key-alice", INSTANCE, "7")
+        await old.close()
+        rotated = LinkStore(path, Fernet.generate_key().decode())
+        await rotated.open()
+        try:
+            outcome = await rotated.purge_by_key_hashes(
+                frozenset(), user_id="7", instance_url=INSTANCE
+            )
+            assert outcome.links == 1
+        finally:
+            await rotated.close()
+
+    async def test_the_id_alone_is_never_enough(self, store):
+        await seed(store)
+        outcome = await store.purge_by_key_hashes(frozenset(), user_id="7")
+        assert outcome.links == 0
+        assert await store.get(1) is not None

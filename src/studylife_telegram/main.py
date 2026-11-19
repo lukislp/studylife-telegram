@@ -19,6 +19,7 @@ live on this side.
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -30,6 +31,7 @@ from typing import Any
 from fastapi import Depends, FastAPI, Header, HTTPException, Path, Request, Response
 from fastapi.responses import HTMLResponse
 
+from .announcements import MissingUserError, parse_announcement
 from .commands import (
     ACCOUNT_FREE_COMMANDS,
     ParsedCommand,
@@ -40,7 +42,7 @@ from .commands import (
 )
 from .config import Settings
 from .confirmation import Verdict, format_code, looks_like_code
-from .link_service import begin_confirmation, confirm
+from .link_service import KEY_REJECTED_NOTICE, begin_confirmation, confirm, drop_rejected_link
 from .linking import (
     LinkError,
     build_connect_url,
@@ -55,7 +57,7 @@ from .linking import (
 from .purge import PurgeRequest, purge_account
 from .reminders import ReminderLoop
 from .store import LinkedAccount, LinkStore, PendingLink
-from .studylife_client import StudyLifeClient
+from .studylife_client import KeyRejectedError, StudyLifeClient
 from .telegram_client import TelegramApiError, TelegramClient
 from .times import zone
 from .verify import (
@@ -63,7 +65,6 @@ from .verify import (
     verify_purge_secret,
     verify_studylife_signature,
     verify_telegram_secret,
-    wants_announcement,
 )
 
 logger = logging.getLogger(__name__)
@@ -132,6 +133,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         leads=settings.reminder_leads,
         tick_seconds=settings.reminder_tick_seconds,
         refresh_seconds=settings.reminder_refresh_seconds,
+        on_key_rejected=lambda chat_id: _drop_rejected(app, chat_id),
     )
     app.state.reminders.start()
     try:
@@ -157,6 +159,12 @@ def _client(account: LinkedAccount) -> StudyLifeClient:
 async def _fetch_sessions(account: LinkedAccount) -> list[dict[str, Any]]:
     async with _client(account) as client:
         return await client.list_sessions()
+
+
+async def _drop_rejected(app: FastAPI, chat_id: int) -> None:
+    """The reminder loop's side of a 401: remove the link and tell the chat once."""
+    await drop_rejected_link(app.state.store, app.state.runs, chat_id)
+    await _send(app.state.telegram, chat_id, KEY_REJECTED_NOTICE)
 
 
 @app.get("/healthz")
@@ -247,15 +255,19 @@ async def _run_command(app: FastAPI, command: Any, chat_id: int) -> str:
     account = await store.get(chat_id)
     if account is None:
         return "Not connected. Send /login to connect your StudyAtrium account."
-    async with _client(account) as client:
-        return await handle(
-            command,
-            client,
-            app.state.runs,
-            chat_id,
-            datetime.now(app.state.tz),
-            app.state.tz,
-        )
+    try:
+        async with _client(account) as client:
+            return await handle(
+                command,
+                client,
+                app.state.runs,
+                chat_id,
+                datetime.now(app.state.tz),
+                app.state.tz,
+            )
+    except KeyRejectedError:
+        await drop_rejected_link(store, app.state.runs, chat_id)
+        return KEY_REJECTED_NOTICE
 
 
 async def _confirm_login(store: LinkStore, chat_id: int, supplied: str) -> str:
@@ -384,7 +396,11 @@ async def purge_user(
 ) -> Response:
     """Cluster-internal, called by StudyAtrium's server when an account is deleted."""
     await purge_account(
-        request.app.state.store, request.app.state.runs, user_id, body or PurgeRequest()
+        request.app.state.store,
+        request.app.state.runs,
+        user_id,
+        body or PurgeRequest(),
+        normalise_instance(str(get_settings().studylife_base_url)),
     )
     return Response(status_code=204)
 
@@ -405,40 +421,23 @@ async def studylife_webhook(
     ):
         return Response(status_code=403)
 
-    payload: dict[str, Any] = await request.json()
-    if not wants_announcement(payload.get("eventType")):
+    try:
+        payload = json.loads(body)
+        if not isinstance(payload, dict):
+            raise ValueError("not an object")
+        announcement = parse_announcement(payload)
+    except (ValueError, MissingUserError):
+        # Signed but unusable: no owner (or no JSON) means there is nobody to tell, and the
+        # bot never falls back to telling everybody.
+        return Response(status_code=400)
+    if announcement is None:
         return Response(status_code=200)
 
-    text = _announcement_text(payload)
-    if text:
-        # Broadcast to every connected chat. This endpoint carries no account identity - the
-        # signature proves only that SOME StudyAtrium instance sent it - so it is only meaningful
-        # in a single-account deployment. Left in place for that case; a multi-account
-        # deployment should leave STUDYLIFE_WEBHOOK_SECRET unset, which disables the route.
-        for account in await request.app.state.store.all_links():
-            await _send(request.app.state.telegram, account.chat_id, text)
+    # Only the chats linked to the user the event belongs to. An unknown user simply has nobody
+    # to notify, which is an ordinary 200 so the sender does not retry.
+    for account in await request.app.state.store.links_for_user(announcement.user_id):
+        await _send(request.app.state.telegram, account.chat_id, announcement.text)
     return Response(status_code=200)
-
-
-def _announcement_text(payload: dict[str, Any]) -> str:
-    event = payload.get("eventType")
-    data = payload.get("data")
-    data = data if isinstance(data, dict) else {}
-    course = data.get("courseName")
-    suffix = f" - {course}" if isinstance(course, str) and course else ""
-    if event == "timer.started":
-        return f"Focus session started{suffix}."
-    if event == "timer.ended":
-        return f"Focus session ended{suffix}."
-    if event == "session.completed":
-        return f"Session logged{suffix}."
-    if event == "course_goal.completed":
-        return f"Course goal completed{suffix}."
-    if event == "new_record.set":
-        return f"New record - longest session so far{suffix}."
-    if event == "plan.generated":
-        return "A new study plan was generated."
-    return ""
 
 
 async def _send(telegram: TelegramClient, chat_id: int, text: str) -> None:

@@ -20,6 +20,7 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, tzinfo
 from typing import Any, NamedTuple
 
+from .studylife_client import KeyRejectedError
 from .times import parse_local
 
 logger = logging.getLogger(__name__)
@@ -123,10 +124,12 @@ class ReminderLoop:
         leads: tuple[int, ...],
         tick_seconds: int = 30,
         refresh_seconds: int = 300,
+        on_key_rejected: Callable[[int], Awaitable[None]] | None = None,
     ) -> None:
         self._accounts = accounts
         self._fetch = fetch
         self._send = send
+        self._on_key_rejected = on_key_rejected
         self._tz = tz
         self._leads = leads
         self._tick = max(5, tick_seconds)
@@ -183,6 +186,13 @@ class ReminderLoop:
     async def _refresh_one(self, account: Any) -> None:
         try:
             self._sessions[account.chat_id] = await self._fetch(account)
+        except KeyRejectedError:
+            # The key is dead for good: let the owner of the store drop the link, and stop
+            # tracking this chat. The chat is told once, because the link is gone afterwards.
+            self._sessions.pop(account.chat_id, None)
+            self._sent.pop(account.chat_id, None)
+            if self._on_key_rejected is not None:
+                await self._on_key_rejected(account.chat_id)
         except Exception:
             # Keeps whatever was last known for this chat rather than dropping it: a single
             # failed refresh should not cancel reminders that are already scheduled.

@@ -1,7 +1,8 @@
 """Account deletion on the StudyAtrium side reaches this bot as a purge call (GDPR Art. 17).
 
 The server sends the SHA-256 hashes of every API key it issued to this bot for the deleted
-account; everything this bot holds for those keys goes with them. Kept free of FastAPI routing so
+account; everything this bot holds for those keys goes with them, as does anything stored under
+the deleted user's id on the calling instance. Kept free of FastAPI routing so
 the rules can be tested against a real store, with main.py as a thin adapter.
 """
 
@@ -27,10 +28,16 @@ class PurgeRequest(BaseModel):
 
 
 async def purge_account(
-    store: LinkStore, runs: RunTracker, user_id: int, request: PurgeRequest
+    store: LinkStore, runs: RunTracker, user_id: int, request: PurgeRequest, instance_url: str
 ) -> None:
-    """Removes every trace of the deleted account. Idempotent: matching nothing is success."""
-    outcome = await store.purge_by_key_hashes(frozenset(request.key_hashes))
+    """Removes every trace of the deleted account. Idempotent: matching nothing is success.
+
+    Rows are matched by key hash and also by user id on `instance_url` - the instance whose
+    server calls this route. The second match is what removes a link whose key was revoked
+    before the deletion, which the key hashes alone could never reach."""
+    outcome = await store.purge_by_key_hashes(
+        frozenset(request.key_hashes), user_id=str(user_id), instance_url=instance_url
+    )
     for chat_id in outcome.chat_ids:
         # A timer run in progress must not be logged to an account that no longer exists. The
         # reminder loop drops its per-chat state itself on its next pass, because the link is

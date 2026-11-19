@@ -11,8 +11,22 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 
+from .commands import RunTracker
 from .confirmation import Verdict, evaluate, new_code
 from .store import LinkStore, PendingLink
+
+KEY_REJECTED_NOTICE = (
+    "StudyAtrium no longer accepts this chat's API key (it was revoked or the account was "
+    "deleted), so the connection was removed. Send /login to connect again."
+)
+
+
+async def drop_rejected_link(store: LinkStore, runs: RunTracker, chat_id: int) -> None:
+    """Removes a link whose API key the server rejected with 401. A key that has stopped working
+    never works again, so keeping the row would only keep a chat id and a dead credential on file
+    for nothing - and every reminder pass would keep retrying it."""
+    runs.forget(chat_id)
+    await store.unlink(chat_id)
 
 
 @dataclass(frozen=True)

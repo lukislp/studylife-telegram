@@ -23,6 +23,14 @@ class StudyLifeApiError(Exception):
         self.body = body
 
 
+class KeyRejectedError(StudyLifeApiError):
+    """The server answered 401: the stored API key no longer works (revoked or deleted). Unlike
+    a 403 or a 5xx this never heals by itself, so callers drop the link instead of retrying."""
+
+    def __init__(self, body: str) -> None:
+        super().__init__(401, body)
+
+
 class StudyLifeClient:
     def __init__(self, base_url: str, api_key: str, timeout: float = 10.0) -> None:
         self._http = httpx.AsyncClient(
@@ -42,6 +50,8 @@ class StudyLifeClient:
 
     async def _request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
         response = await self._http.request(method, path, **kwargs)
+        if response.status_code == 401:
+            raise KeyRejectedError(response.text)
         if response.status_code >= 400:
             raise StudyLifeApiError(response.status_code, response.text)
         return response

@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, tzinfo
 from typing import Any
 
-from .studylife_client import StudyLifeApiError, StudyLifeClient
+from .studylife_client import KeyRejectedError, StudyLifeApiError, StudyLifeClient
 from .times import parse_local, sum_hours_on
 
 # Focus/break lengths of StudyAtrium's built-in presets. Needed because PhaseEndsAt is an absolute
@@ -329,14 +329,17 @@ async def handle(
     now: datetime,
     tz: tzinfo,
 ) -> str:
-    """Runs one command and returns the reply text. Never raises: a failure the user can act on
-    is more useful in the chat than in the pod log.
+    """Runs one command and returns the reply text. Raises nothing but KeyRejectedError: a
+    failure the user can act on is more useful in the chat than in the pod log. A rejected key is
+    the one exception, because dropping the link is the caller's job (it owns the store).
 
     `now` is passed in rather than read here so every reply in one delivery is computed against
     a single instant, and so the tests need no clock.
     """
     try:
         return await _dispatch(command, client, runs, chat_id, now, tz)
+    except KeyRejectedError:
+        raise
     except StudyLifeApiError as exc:
         if exc.status_code == 403:
             return (

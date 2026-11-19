@@ -18,7 +18,7 @@ from studylife_telegram.commands import (
     next_timer_state,
     parse_command,
 )
-from studylife_telegram.studylife_client import StudyLifeApiError
+from studylife_telegram.studylife_client import KeyRejectedError, StudyLifeApiError
 
 TZ = ZoneInfo("Europe/Berlin")
 NOW = datetime(2026, 9, 17, 12, 0, tzinfo=TZ)
@@ -436,3 +436,8 @@ class TestHandle:
     async def test_other_api_errors_do_not_escape(self) -> None:
         client = FakeClient(raises=StudyLifeApiError(502, "bad gateway"))
         assert "502" in await run(ParsedCommand("today", ""), client)
+
+    async def test_a_rejected_key_is_left_for_the_caller_to_act_on(self) -> None:
+        client = FakeClient(raises=KeyRejectedError("revoked"))
+        with pytest.raises(KeyRejectedError):
+            await run(ParsedCommand("status", ""), client)

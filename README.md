@@ -158,7 +158,7 @@ Rotating it breaks no data, but every chat has to `/login` again.
 | `STUDYLIFE_EXTRA_INSTANCES` | no | Further instances users may connect to |
 | `STUDYLIFE_ALLOW_ANY_INSTANCE` | no | `true` allows any https instance |
 | `LINK_ENCRYPTION_KEY` | yes | Fernet key encrypting the stored API keys |
-| `STUDYLIFE_WEBHOOK_SECRET` | no | Enables the StudyAtrium → Telegram direction |
+| `STUDYLIFE_WEBHOOK_SECRET` | no | Enables the StudyAtrium → Telegram direction (per-user, see below) |
 | `PUBLIC_BASE_URL` | yes | Where StudyAtrium returns to after `/login` |
 | `STUDYLIFE_PURGE_SECRET` | no | Enables account-deletion purges (see below); unset = route answers 503 |
 | `LINK_DB_PATH` | no | SQLite file with the chat→account links (default `/app/data/links.db`) |
@@ -196,6 +196,31 @@ Both inbound routes answer `200` for anything they choose to ignore. Telegram re
 and eventually disables the webhook entirely, and StudyAtrium's delivery service behaves the same —
 so "received but not acted on" must never look like a failure.
 
+## Webhook deliveries (StudyAtrium to Telegram)
+
+`POST /webhooks/studylife` is off (404) unless `STUDYLIFE_WEBHOOK_SECRET` is set. An event goes to
+the chats linked to the user it belongs to, and to nobody else. The body is the JSON
+`studylife-webhooks` delivers, signed with HMAC-SHA256 over the raw bytes
+(`X-StudyLife-Webhook-Signature`, compared in constant time), and it must name its owner:
+
+```json
+{
+  "event_type": "session.completed",
+  "occurred_at": "2026-11-19T12:00:00Z",
+  "user_id": 7,
+  "payload": { "courseName": "Analysis II" }
+}
+```
+
+- `user_id` is required and covered by the signature. It is a positive integer or a non-empty
+  string, matched against the user id stored when the chat was linked. A body without a usable
+  `user_id` is rejected with `400` and nothing is sent. There is no broadcast to all chats.
+- A wrong or missing signature is `403`. A user with no linked chat, or an event type the bot does
+  not announce, is a plain `200` with no delivery, so the sender does not retry.
+- User ids are only unique per StudyAtrium instance. Point `STUDYLIFE_WEBHOOK_SECRET` at one
+  instance's webhook service; if the bot is linked to several instances, two users with the same
+  id on different instances would both be notified.
+
 ## Account deletion (purge)
 
 When a user deletes their StudyAtrium account, the server calls this bot so nothing is left
@@ -210,8 +235,11 @@ X-StudyLife-Shared-Secret: <STUDYLIFE_PURGE_SECRET>
 - `key_hashes` are the lowercase hex SHA-256 of every API key the server issued to this bot for
   that user (at most 50, each exactly 64 hex characters; otherwise `422`). The bot hashes each
   stored key and deletes the matching links, any approval still waiting for its code, and the
-  open `/login` of those chats, in one transaction. Matching is by key, not by user id, because
-  user ids are only unique per StudyAtrium instance and this bot serves several.
+  open `/login` of those chats, in one transaction.
+- Rows are also deleted by user id, but only for the default instance (`STUDYLIFE_BASE_URL`),
+  never by id alone: user ids are only unique per StudyAtrium instance and this bot may serve
+  several. This is what removes a link whose key was revoked before the deletion (its hash is
+  then no longer known to the server) or whose key can no longer be decrypted.
 - `204` on success, also when nothing matched or on a repeat call. `401` for a wrong or missing
   secret, `503` when `STUDYLIFE_PURGE_SECRET` is unset (the route is never open without one).
 - The chat is not messaged: the account is already gone. The log gets the user id and counts only.
@@ -219,6 +247,16 @@ X-StudyLife-Shared-Secret: <STUDYLIFE_PURGE_SECRET>
   and `k8s/03-network-policies.yaml` lets only the StudyAtrium server pods reach the port. On the
   server, configure `AddonPurge:Telegram:BaseUrl` and `AddonPurge:Telegram:SharedSecret` (the
   same value as `STUDYLIFE_PURGE_SECRET`).
+
+## Revoked keys and stale logins
+
+- When StudyAtrium answers `401` to a chat's stored API key (revoked, or the account is gone), the
+  bot removes that chat's link and tells the chat to `/login` again. This happens both when the
+  chat sends a command and when the reminder loop refreshes its sessions. Other errors (403, 5xx)
+  keep the link.
+- Open `/login` requests and approvals still waiting for their code are deleted once they are
+  older than their ten-minute lifetime. The sweep runs at startup and whenever a new login or
+  approval is stored.
 
 ## Development
 
