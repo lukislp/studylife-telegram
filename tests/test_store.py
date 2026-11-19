@@ -3,6 +3,7 @@ import time
 import pytest
 from cryptography.fernet import Fernet
 
+from studylife_telegram.confirmation import CONFIRMATION_TTL_SECONDS
 from studylife_telegram.store import PENDING_TTL_SECONDS, LinkStore, PendingLink
 
 INSTANCE = "https://studylife.example"
@@ -133,3 +134,84 @@ class TestPendingLogins:
         await store.put_pending(self._pending("s1"))
         await store.put_pending(self._pending("s2"))
         assert await store.take_pending("s2") is not None
+
+
+class TestSweepExpired:
+    async def _rows(self, store: LinkStore, table: str) -> int:
+        async with store._conn.execute(f"SELECT COUNT(*) FROM {table}") as cursor:
+            row = await cursor.fetchone()
+        assert row is not None
+        return int(row[0])
+
+    async def test_removes_expired_logins_and_approvals_that_nobody_completed(
+        self, store: LinkStore
+    ) -> None:
+        now = time.time()
+        await store.put_pending(
+            PendingLink(state="old", chat_id=1, code_verifier="v", instance_url=INSTANCE)
+        )
+        await store.put_confirmation(2, "12345678", "key", INSTANCE, "u2", now=now)
+        later = now + max(PENDING_TTL_SECONDS, CONFIRMATION_TTL_SECONDS) + 1
+
+        assert await store.sweep_expired(now=later) == 2
+        assert await self._rows(store, "pending_links") == 0
+        assert await self._rows(store, "pending_confirmations") == 0
+
+    async def test_keeps_what_is_still_valid_and_never_touches_links(
+        self, store: LinkStore
+    ) -> None:
+        now = time.time()
+        await store.link(1, "key", INSTANCE, "u1")
+        await store.put_pending(
+            PendingLink(state="fresh", chat_id=2, code_verifier="v", instance_url=INSTANCE)
+        )
+        await store.put_confirmation(3, "12345678", "key", INSTANCE, "u3", now=now)
+
+        assert await store.sweep_expired(now=now + 1) == 0
+        assert await store.get(1) is not None
+        assert await self._rows(store, "pending_links") == 1
+        assert await self._rows(store, "pending_confirmations") == 1
+
+    async def test_storing_a_new_login_sweeps_the_expired_ones_first(
+        self, store: LinkStore
+    ) -> None:
+        await store._conn.execute(
+            "INSERT INTO pending_links (state, chat_id, code_verifier, instance_url, created_at) "
+            "VALUES ('stale', 1, 'v', ?, ?)",
+            (INSTANCE, time.time() - PENDING_TTL_SECONDS - 5),
+        )
+        await store._conn.commit()
+        await store.put_pending(
+            PendingLink(state="new", chat_id=2, code_verifier="v", instance_url=INSTANCE)
+        )
+        assert await self._rows(store, "pending_links") == 1
+
+    async def test_opening_the_store_sweeps(self, tmp_path) -> None:
+        path = str(tmp_path / "links.db")
+        key = Fernet.generate_key().decode()
+        first = LinkStore(path, key)
+        await first.open()
+        await first._conn.execute(
+            "INSERT INTO pending_links (state, chat_id, code_verifier, instance_url, created_at) "
+            "VALUES ('stale', 1, 'v', ?, ?)",
+            (INSTANCE, time.time() - PENDING_TTL_SECONDS - 5),
+        )
+        await first._conn.commit()
+        await first.close()
+
+        second = LinkStore(path, key)
+        await second.open()
+        try:
+            assert await self._rows(second, "pending_links") == 0
+        finally:
+            await second.close()
+
+
+class TestLinksForUser:
+    async def test_returns_only_that_users_chats(self, store: LinkStore) -> None:
+        await store.link(1, "a", INSTANCE, "7")
+        await store.link(2, "b", INSTANCE, "8")
+        await store.link(3, "c", INSTANCE, None)
+        await store.link(4, "d", INSTANCE, "7")
+        assert [a.chat_id for a in await store.links_for_user("7")] == [1, 4]
+        assert await store.links_for_user("9") == []
