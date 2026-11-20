@@ -158,7 +158,8 @@ Rotating it breaks no data, but every chat has to `/login` again.
 | `STUDYLIFE_EXTRA_INSTANCES` | no | Further instances users may connect to |
 | `STUDYLIFE_ALLOW_ANY_INSTANCE` | no | `true` allows any https instance |
 | `LINK_ENCRYPTION_KEY` | yes | Fernet key encrypting the stored API keys |
-| `STUDYLIFE_WEBHOOK_SECRET` | no | Enables the StudyAtrium → Telegram direction (per-user, see below) |
+| `STUDYLIFE_WEBHOOKS` | no | JSON list of `{id, secret, instance?}`, one per webhook; enables the StudyAtrium → Telegram direction (see below) |
+| `STUDYLIFE_WEBHOOK_SECRET` | no | Single legacy secret for deliveries without a webhook id |
 | `PUBLIC_BASE_URL` | yes | Where StudyAtrium returns to after `/login` |
 | `STUDYLIFE_PURGE_SECRET` | no | Enables account-deletion purges (see below); unset = route answers 503 |
 | `LINK_DB_PATH` | no | SQLite file with the chat→account links (default `/app/data/links.db`) |
@@ -198,10 +199,11 @@ so "received but not acted on" must never look like a failure.
 
 ## Webhook deliveries (StudyAtrium to Telegram)
 
-`POST /webhooks/studylife` is off (404) unless `STUDYLIFE_WEBHOOK_SECRET` is set. An event goes to
-the chats linked to the user it belongs to, and to nobody else. The body is the JSON
-`studylife-webhooks` delivers, signed with HMAC-SHA256 over the raw bytes
-(`X-StudyLife-Webhook-Signature`, compared in constant time), and it must name its owner:
+`POST /webhooks/studylife` is off (404) unless `STUDYLIFE_WEBHOOKS` or `STUDYLIFE_WEBHOOK_SECRET` is
+set. An event goes to the chats linked to the user it belongs to, on the instance that webhook
+belongs to, and to nobody else. The body is the JSON `studylife-webhooks` delivers, signed with
+HMAC-SHA256 over the raw bytes (`X-StudyLife-Webhook-Signature`, compared in constant time), and
+it must name its owner:
 
 ```json
 {
@@ -217,9 +219,29 @@ the chats linked to the user it belongs to, and to nobody else. The body is the 
   `user_id` is rejected with `400` and nothing is sent. There is no broadcast to all chats.
 - A wrong or missing signature is `403`. A user with no linked chat, or an event type the bot does
   not announce, is a plain `200` with no delivery, so the sender does not retry.
-- User ids are only unique per StudyAtrium instance. Point `STUDYLIFE_WEBHOOK_SECRET` at one
-  instance's webhook service; if the bot is linked to several instances, two users with the same
-  id on different instances would both be notified.
+- Every webhook has its own secret, and `studylife-webhooks` names the webhook in the
+  `X-StudyLife-Webhook-Id` header (needs the studylife-webhooks release that adds it). The bot
+  verifies a delivery with the secret of the webhook it names, so every user's webhook can point
+  at the same bot. List them in `STUDYLIFE_WEBHOOKS`, one entry per webhook (id and secret as
+  shown when the webhook was created):
+
+  ```json
+  [
+    {"id": "<webhook id>", "secret": "<its secret>"},
+    {"id": "<webhook id>", "secret": "<its secret>", "instance": "https://other.example"}
+  ]
+  ```
+
+  `instance` is optional and defaults to `STUDYLIFE_BASE_URL`. A malformed list stops the start.
+  A delivery naming an id that is not listed is `403`; it is never tried against another
+  webhook's secret.
+- Existing single-secret setups keep working: a delivery without the id header (an older
+  `studylife-webhooks`) is verified with `STUDYLIFE_WEBHOOK_SECRET` and belongs to the default
+  instance. A delivery that does name a webhook is never accepted on that legacy secret.
+- User ids are only unique per StudyAtrium instance, and the id is chosen by that instance. The
+  bot therefore matches on the pair (instance, user id): the instance comes from the verified
+  webhook entry, never from the delivery, and a chat linked to the same user id on another
+  instance is not notified.
 
 ## Account deletion (purge)
 

@@ -1,5 +1,9 @@
-from pydantic import AnyHttpUrl
+from __future__ import annotations
+
+from pydantic import AnyHttpUrl, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from .webhook_registry import WebhookEndpoint, parse_endpoints
 
 
 class Settings(BaseSettings):
@@ -57,6 +61,15 @@ class Settings(BaseSettings):
     # session events); commands work without it.
     studylife_webhook_secret: str | None = None
 
+    # One entry per StudyAtrium webhook pointed at this bot, as JSON:
+    # [{"id": "<webhook id>", "secret": "<its secret>", "instance": "<optional instance URL>"}].
+    # studylife-webhooks signs each webhook with its own secret and names it in
+    # X-StudyLife-Webhook-Id, so a bot serving several users needs one entry per webhook.
+    # instance defaults to studylife_base_url. A delivery that carries an id is verified with
+    # that entry only, and an unknown id is always rejected; studylife_webhook_secret remains the
+    # fallback for deliveries without an id (older studylife-webhooks).
+    studylife_webhooks: str = ""
+
     # Shared secret for POST /internal/users/{id}/purge, which StudyAtrium's server calls when a
     # user deletes their account (X-StudyLife-Shared-Secret header, compared in constant time).
     # Unset or empty switches the route off (503) - it is never open without a secret. The route
@@ -90,6 +103,16 @@ class Settings(BaseSettings):
     # Two intervals because /api/sessions is unwindowed - see reminders.ReminderLoop.
     reminder_tick_seconds: int = 30
     reminder_refresh_seconds: int = 300
+
+    @model_validator(mode="after")
+    def _webhooks_parse(self) -> Settings:
+        # Fail at start, not at the first delivery, on a malformed STUDYLIFE_WEBHOOKS.
+        parse_endpoints(self.studylife_webhooks, str(self.studylife_base_url))
+        return self
+
+    @property
+    def webhook_endpoints(self) -> dict[str, WebhookEndpoint]:
+        return parse_endpoints(self.studylife_webhooks, str(self.studylife_base_url))
 
     @property
     def allowed_chat_ids(self) -> frozenset[int]:

@@ -422,16 +422,30 @@ async def purge_user(
 async def studylife_webhook(
     request: Request,
     x_studylife_webhook_signature: str | None = Header(default=None),
+    x_studylife_webhook_id: str | None = Header(default=None),
 ) -> Response:
     settings = get_settings()
-    if not settings.studylife_webhook_secret:
+    endpoints = settings.webhook_endpoints
+    if not endpoints and not settings.studylife_webhook_secret:
         return Response(status_code=404)
+
+    # Each webhook has its own secret, so the delivery names the one it belongs to. An id that is
+    # not configured is refused outright, never tried against another webhook's secret.
+    if x_studylife_webhook_id is not None:
+        endpoint = endpoints.get(x_studylife_webhook_id)
+        if endpoint is None:
+            return Response(status_code=403)
+        secret, instance = endpoint.secret, endpoint.instance_url
+    elif settings.studylife_webhook_secret:
+        # Deliveries without an id (older studylife-webhooks) use the single legacy secret.
+        secret = settings.studylife_webhook_secret
+        instance = normalise_instance(str(settings.studylife_base_url))
+    else:
+        return Response(status_code=403)
 
     # The RAW body: re-serialising the parsed JSON reorders keys and the HMAC would never match.
     body = await request.body()
-    if not verify_studylife_signature(
-        settings.studylife_webhook_secret, x_studylife_webhook_signature, body
-    ):
+    if not verify_studylife_signature(secret, x_studylife_webhook_signature, body):
         return Response(status_code=403)
 
     try:
@@ -446,9 +460,10 @@ async def studylife_webhook(
     if announcement is None:
         return Response(status_code=200)
 
-    # Only the chats linked to the user the event belongs to. An unknown user simply has nobody
+    # Only the chats linked to the user the event belongs to, on the instance the verified webhook
+    # belongs to (user ids are only unique per instance). An unknown user simply has nobody
     # to notify, which is an ordinary 200 so the sender does not retry.
-    for account in await request.app.state.store.links_for_user(announcement.user_id):
+    for account in await request.app.state.store.links_for_user(announcement.user_id, instance):
         await _send(request.app.state.telegram, account.chat_id, announcement.text)
     return Response(status_code=200)
 
