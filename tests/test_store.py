@@ -213,5 +213,13 @@ class TestLinksForUser:
         await store.link(2, "b", INSTANCE, "8")
         await store.link(3, "c", INSTANCE, None)
         await store.link(4, "d", INSTANCE, "7")
-        assert [a.chat_id for a in await store.links_for_user("7")] == [1, 4]
-        assert await store.links_for_user("9") == []
+        assert [a.chat_id for a in await store.links_for_user("7", INSTANCE)] == [1, 4]
+        assert await store.links_for_user("9", INSTANCE) == []
+
+    async def test_the_same_user_id_on_another_instance_is_a_different_user(
+        self, store: LinkStore
+    ) -> None:
+        await store.link(1, "a", INSTANCE, "7")
+        await store.link(2, "b", "https://other.example", "7")
+        assert [a.chat_id for a in await store.links_for_user("7", INSTANCE)] == [1]
+        assert [a.chat_id for a in await store.links_for_user("7", "https://other.example")] == [2]

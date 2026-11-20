@@ -171,3 +171,114 @@ class TestParseAnnouncement:
     def test_a_missing_user_raises(self):
         with pytest.raises(MissingUserError):
             parse_announcement({"event_type": "session.completed"})
+
+
+OTHER = "https://other.example"
+WEBHOOKS = json.dumps(
+    [
+        {"id": "wh-alice", "secret": "secret-alice"},
+        {"id": "wh-bob", "secret": "secret-bob"},
+        {"id": "wh-other", "secret": "secret-other", "instance": OTHER + "/"},
+    ]
+)
+
+
+def multi_settings(legacy: str | None = None) -> Settings:
+    return Settings(
+        telegram_bot_token="t",
+        telegram_webhook_secret="w",
+        telegram_allow_any_chat=True,
+        studylife_base_url=INSTANCE,
+        link_encryption_key=Fernet.generate_key().decode(),
+        studylife_webhook_secret=legacy,
+        studylife_webhooks=WEBHOOKS,
+    )
+
+
+def sign_for(raw: bytes, webhook_id: str, secret: str) -> dict[str, str]:
+    return {**sign(raw, secret), "X-StudyLife-Webhook-Id": webhook_id}
+
+
+class TestPerWebhookSecrets:
+    @pytest.fixture(autouse=True)
+    def configured(self, client, monkeypatch) -> None:
+        # Depends on `client` so this override is applied after the client fixture's own.
+        monkeypatch.setattr(main, "get_settings", lambda: multi_settings())
+
+    async def test_every_webhook_verifies_with_its_own_secret(self, client, telegram):
+        for user, webhook, secret in ((7, "wh-alice", "secret-alice"), (8, "wh-bob", "secret-bob")):
+            raw = body(user_id=user)
+            response = await post(client, raw, headers=sign_for(raw, webhook, secret))
+            assert response.status_code == 200
+        assert [chat for chat, _ in telegram.sent] == [1, 2]
+
+    async def test_another_webhooks_secret_is_rejected(self, client, telegram):
+        raw = body(user_id=7)
+        response = await post(client, raw, headers=sign_for(raw, "wh-alice", "secret-bob"))
+        assert response.status_code == 403
+        assert telegram.sent == []
+
+    async def test_an_unknown_webhook_id_is_rejected(self, client, telegram):
+        raw = body(user_id=7)
+        response = await post(client, raw, headers=sign_for(raw, "wh-nobody", "secret-alice"))
+        assert response.status_code == 403
+        assert telegram.sent == []
+
+    async def test_a_delivery_without_an_id_is_rejected_when_no_legacy_secret_is_set(
+        self, client, telegram
+    ):
+        raw = body(user_id=7)
+        assert (await post(client, raw, headers=sign(raw, "secret-alice"))).status_code == 403
+        assert telegram.sent == []
+
+    async def test_the_legacy_secret_still_verifies_deliveries_without_an_id(
+        self, client, telegram, monkeypatch
+    ):
+        monkeypatch.setattr(main, "get_settings", lambda: multi_settings(legacy=SECRET))
+        assert (await post(client, body(user_id=7))).status_code == 200
+        assert telegram.sent == [(1, "Session logged - Analysis II.")]
+
+    async def test_the_legacy_secret_does_not_verify_a_delivery_that_names_a_webhook(
+        self, client, telegram, monkeypatch
+    ):
+        monkeypatch.setattr(main, "get_settings", lambda: multi_settings(legacy=SECRET))
+        raw = body(user_id=7)
+        response = await post(client, raw, headers=sign_for(raw, "wh-alice", SECRET))
+        assert response.status_code == 403
+
+    async def test_the_same_user_id_on_two_instances_is_isolated(self, client, store, telegram):
+        await store.link(10, "key-other", OTHER, "7")
+        raw = body(user_id=7)
+        await post(client, raw, headers=sign_for(raw, "wh-alice", "secret-alice"))
+        assert [chat for chat, _ in telegram.sent] == [1]
+        telegram.sent.clear()
+        await post(client, raw, headers=sign_for(raw, "wh-other", "secret-other"))
+        assert [chat for chat, _ in telegram.sent] == [10]
+
+
+class TestWebhookConfig:
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            "not json",
+            '{"id": "a"}',
+            "[1]",
+            '[{"id": "a"}]',
+            '[{"id": "", "secret": "s"}]',
+            '[{"id": "a", "secret": "s"}, {"id": "a", "secret": "t"}]',
+        ],
+    )
+    def test_a_malformed_list_stops_the_start(self, raw):
+        with pytest.raises(ValueError):
+            Settings(
+                telegram_bot_token="t",
+                telegram_webhook_secret="w",
+                studylife_base_url=INSTANCE,
+                link_encryption_key=Fernet.generate_key().decode(),
+                studylife_webhooks=raw,
+            )
+
+    def test_the_instance_defaults_and_is_normalised(self):
+        endpoints = multi_settings().webhook_endpoints
+        assert endpoints["wh-alice"].instance_url == INSTANCE
+        assert endpoints["wh-other"].instance_url == OTHER
