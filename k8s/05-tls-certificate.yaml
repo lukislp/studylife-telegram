@@ -1,0 +1,25 @@
+# Server certificate for the HTTPS listener (k8s/02-app.yaml, src/studylife_telegram/tls.py, port 8443) that the
+# StudyAtrium server calls for the account-deletion purge. Issued by StudyAtrium's own
+# cluster-internal CA (ClusterIssuer studylife-internal-ca-issuer, studylife repo
+# k8s/07b-cert-manager-issuers.yaml), the CA StudyAtrium validates add-on certificates against (its
+# AddonTls:CaCertificatePath, docs/SECURITY-ASSURANCE.md section 8.3). The dnsNames are the Service
+# names StudyAtrium puts in AddonPurge__Telegram__BaseUrl, and StudyAtrium checks the host name.
+#
+# cert-manager defaults (90 days, renewed 30 days before expiry). tls.py reloads the renewed files
+# from the mounted Secret without a restart. Flux-managed (k8s/flux-deploy/), same as
+# studylife-webhooks' certificate; the reconciler's ClusterRole covers cert-manager.io/certificates.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: studylife-telegram-tls
+  namespace: studylife-telegram
+spec:
+  secretName: studylife-telegram-tls
+  dnsNames:
+    - studylife-telegram.studylife-telegram.svc.cluster.local
+    - studylife-telegram.studylife-telegram.svc
+    - studylife-telegram
+  issuerRef:
+    name: studylife-internal-ca-issuer
+    kind: ClusterIssuer
+    group: cert-manager.io

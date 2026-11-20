@@ -60,6 +60,7 @@ from .store import LinkedAccount, LinkStore, PendingLink
 from .studylife_client import KeyRejectedError, StudyLifeClient
 from .telegram_client import TelegramApiError, TelegramClient
 from .times import zone
+from .tls import tls_files, tls_listener
 from .verify import (
     is_allowed_chat,
     verify_purge_secret,
@@ -137,7 +138,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
     app.state.reminders.start()
     try:
-        yield
+        # HTTPS listener for the StudyAtrium purge hop (tls.py): only when the certificate files
+        # are configured. A failure here raises, so the process exits instead of running without
+        # the TLS listener it was asked for.
+        files = tls_files(
+            settings.studylife_telegram_tls_cert_file, settings.studylife_telegram_tls_key_file
+        )
+        async with tls_listener(
+            app,
+            files,
+            settings.studylife_telegram_tls_port,
+            settings.studylife_telegram_tls_reload_interval_seconds,
+        ):
+            yield
     finally:
         await app.state.reminders.stop()
         await app.state.store.close()

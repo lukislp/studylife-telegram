@@ -76,6 +76,16 @@ class Settings(BaseSettings):
     # is cluster-internal: it is not on the public funnel, see k8s/04-tailscale-funnel.yaml.
     studylife_purge_secret: str | None = None
 
+    # Optional HTTPS listener for the StudyAtrium -> studylife-telegram purge hop (tls.py, README
+    # "TLS"). With both files set the app is also served over HTTPS on the TLS port; only one
+    # of the two, or a certificate that cannot be loaded, stops the start. Unset (the default)
+    # keeps the plain HTTP port only, which StudyAtrium then reaches only through its explicit
+    # AddonPurge:<Addon>:AllowPlainHttp opt-in.
+    studylife_telegram_tls_cert_file: str | None = None
+    studylife_telegram_tls_key_file: str | None = None
+    studylife_telegram_tls_port: int = 8443
+    studylife_telegram_tls_reload_interval_seconds: float = 300.0
+
     # Public base URL this bot is reachable at, used by the one-off webhook registration helper.
     # Telegram only delivers to HTTPS with a valid certificate.
     public_base_url: AnyHttpUrl | None = None
