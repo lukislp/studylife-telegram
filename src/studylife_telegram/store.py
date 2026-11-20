@@ -358,14 +358,15 @@ class LinkStore:
         ) as cursor:
             return {row[0] for row in await cursor.fetchall()}
 
-    async def links_for_user(self, user_id: str) -> list[LinkedAccount]:
-        """Every chat linked to this StudyAtrium user id, for delivering one user's events to
-        that user's own chats only. Ids are unique per instance, not across instances - see
-        README.md ("Webhook deliveries") for what that means for a multi-instance deployment."""
+    async def links_for_user(self, user_id: str, instance_url: str) -> list[LinkedAccount]:
+        """Every chat linked to this StudyAtrium user on this instance, for delivering one
+        user's events to that user's own chats only. Ids are unique per instance, not across
+        instances, so the id alone never selects a chat."""
         async with self._conn.execute(
             "SELECT chat_id, encrypted_api_key, instance_url, studylife_user_id "
-            "FROM linked_accounts WHERE studylife_user_id = ? ORDER BY chat_id",
-            (user_id,),
+            "FROM linked_accounts WHERE studylife_user_id = ? AND instance_url = ? "
+            "ORDER BY chat_id",
+            (user_id, instance_url),
         ) as cursor:
             rows = await cursor.fetchall()
         accounts = [self._row_to_account(row[0], row[1:]) for row in rows]
