@@ -59,10 +59,20 @@ spec:
             # this alone - it converts explicitly via STUDYLIFE_TIMEZONE - but keeping the
             # container clock in the same zone means logs and timestamps read the same too.
             - {name: TZ, value: Europe/Berlin}
+            # HTTPS listener for the StudyAtrium -> studylife-telegram purge hop
+            # (src/studylife_telegram/tls.py) on 8443, with the cert-manager certificate from
+            # 05-tls-certificate.yaml. StudyAtrium's AddonPurge__Telegram__BaseUrl calls this port
+            # and validates the certificate against its internal CA. Removing the two variables
+            # is the explicit opt-out back to plain HTTP only.
+            - {name: STUDYLIFE_TELEGRAM_TLS_CERT_FILE, value: /etc/studylife-telegram-tls/tls.crt}
+            - {name: STUDYLIFE_TELEGRAM_TLS_KEY_FILE, value: /etc/studylife-telegram-tls/tls.key}
           envFrom:
             - secretRef: {name: studylife-telegram-secrets}
           ports:
             - containerPort: 8000
+            # STUDYLIFE_TELEGRAM_TLS_PORT default (config.py): HTTPS for the same app. 8000 stays
+            # for the kubelet probes and the Funnel.
+            - containerPort: 8443
           resources:
             requests: {cpu: 50m, memory: 64Mi}
             limits: {cpu: 250m, memory: 128Mi}
@@ -77,9 +87,16 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /app/data
+            - name: tls
+              mountPath: /etc/studylife-telegram-tls
+              readOnly: true
       volumes:
         - name: data
           persistentVolumeClaim: {claimName: studylife-telegram-data}
+        # Written by cert-manager (05-tls-certificate.yaml). A Secret volume follows renewals, and
+        # tls.py reloads the files without a restart.
+        - name: tls
+          secret: {secretName: studylife-telegram-tls}
 ---
 apiVersion: v1
 kind: Service
@@ -93,3 +110,8 @@ spec:
     - name: http
       port: 8000
       targetPort: 8000
+    # HTTPS for the StudyAtrium -> studylife-telegram purge hop (tls.py, 05-tls-certificate.yaml).
+    # StudyAtrium's AddonPurge__Telegram__BaseUrl points here.
+    - name: https
+      port: 8443
+      targetPort: 8443

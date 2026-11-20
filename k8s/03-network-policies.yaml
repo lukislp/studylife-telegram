@@ -66,3 +66,7 @@ spec:
               - { key: app, operator: In, values: [studylife-web, studylife-worker] }
       ports:
         - { protocol: TCP, port: 8000 }
+        # HTTPS listener (tls.py, STUDYLIFE_TELEGRAM_TLS_PORT) - the port StudyAtrium's
+        # AddonPurge__Telegram__BaseUrl uses once it calls over TLS. 8000 stays allowed until that
+        # switch is live and can be dropped afterwards.
+        - { protocol: TCP, port: 8443 }

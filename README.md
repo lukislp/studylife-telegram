@@ -248,6 +248,24 @@ X-StudyLife-Shared-Secret: <STUDYLIFE_PURGE_SECRET>
   server, configure `AddonPurge:Telegram:BaseUrl` and `AddonPurge:Telegram:SharedSecret` (the
   same value as `STUDYLIFE_PURGE_SECRET`).
 
+### TLS
+
+The purge call carries the shared secret and the SHA-256 hashes of the user's API keys, so it should not cross the network in plain text. With both files set, [`tls.py`](src/studylife_telegram/tls.py) starts a second `uvicorn.Server` in the same process that serves the same app over HTTPS on `STUDYLIFE_TELEGRAM_TLS_PORT` (default `8443`), TLS 1.2 minimum. Only one file set, an unloadable certificate or a port that cannot be bound stops the start, so the service never runs without the TLS listener it was asked for. uvicorn does not reload certificates itself; `tls.py` checks the files periodically and loads a renewed pair into the running listener, so new handshakes use it without a restart. Port `8000` stays plain HTTP for the kubelet probes.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `STUDYLIFE_TELEGRAM_TLS_CERT_FILE` | *(unset)* | PEM certificate chain. Set together with the key file, or not at all. |
+| `STUDYLIFE_TELEGRAM_TLS_KEY_FILE` | *(unset)* | PEM private key. |
+| `STUDYLIFE_TELEGRAM_TLS_PORT` | `8443` | Port of the HTTPS listener. |
+| `STUDYLIFE_TELEGRAM_TLS_RELOAD_INTERVAL_SECONDS` | `300` | How often the files are checked for a renewed certificate. |
+
+Unset (the default), the add-on only serves plain HTTP, which a single-host Docker Compose setup on a private network keeps working with: StudyAtrium then reaches it over `http://` and logs a warning at startup. To encrypt the hop:
+
+1. Issue a certificate whose subject alternative names include the host name StudyAtrium uses in `AddonPurge__Telegram__BaseUrl` (for example the Compose service name `studylife-telegram`), signed by a CA of your own. In k3s this is the cert-manager `Certificate` in [`k8s/05-tls-certificate.yaml`](k8s/05-tls-certificate.yaml), issued by StudyAtrium's internal CA.
+2. Mount the certificate and key into the container and set the two `STUDYLIFE_TELEGRAM_TLS_*_FILE` variables.
+3. Give StudyAtrium the CA certificate (`AddonTls__CaCertificatePath`) and switch the URL to `AddonPurge__Telegram__BaseUrl=https://studylife-telegram:8443`. StudyAtrium validates the chain and the host name; there is no setting that turns the validation off. Once every add-on serves TLS, `AddonTls__RequireHttps=true` makes StudyAtrium refuse any `http://` add-on URL.
+
+Rollout in k3s, in this order: (1) merge and release this repository (Certificate, port and TLS variables through Flux; the listener starts with the release image); (2) apply the updated `k8s/03-network-policies.yaml` by hand (it only adds `8443` and is not Flux-managed); (3) StudyAtrium's switch of `AddonPurge__Telegram__BaseUrl` to `https://studylife-telegram.studylife-telegram.svc.cluster.local:8443` and the removal of `AddonPurge__Telegram__AllowPlainHttp` (StudyAtrium repository). Purges that fail in between stay in StudyAtrium's outbox and are retried, never dropped.
 ## Revoked keys and stale logins
 
 - When StudyAtrium answers `401` to a chat's stored API key (revoked, or the account is gone), the
